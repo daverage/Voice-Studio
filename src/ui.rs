@@ -94,6 +94,11 @@ const STYLE: &str = r#"
         color: inherit;
     }
 
+    .suggest-button-label:disabled {
+        opacity: 1;
+        color: inherit;
+    }
+
 
     .suggest-progress {
         font-size: 10px;
@@ -149,97 +154,6 @@ const STYLE: &str = r#"
         margin-bottom: 5px;
     }
 "#;
-
-#[derive(Lens)]
-struct SuggestButton {
-    param_base: ParamWidgetBase,
-    use_scroll_wheel: bool,
-    scrolled_lines: f32,
-}
-
-impl SuggestButton {
-    fn new<'a, L, Params, P, FMap>(
-        cx: &'a mut Context,
-        params: L,
-        params_to_param: FMap,
-        label_entity: Arc<Mutex<Option<Entity>>>,
-        label: &'static str,
-    ) -> Handle<'a, Self>
-    where
-        L: Lens<Target = Params> + Clone,
-        Params: 'static,
-        P: Param + 'static,
-        FMap: Fn(&Params) -> &P + Copy + 'static,
-    {
-        Self {
-            param_base: ParamWidgetBase::new(cx, params, params_to_param),
-            use_scroll_wheel: true,
-            scrolled_lines: 0.0,
-        }
-        .build(
-            cx,
-            ParamWidgetBase::build_view(params, params_to_param, move |cx, _param_data| {
-                let label = Label::new(cx, label)
-                    .class("suggest-button-label")
-                    .hoverable(false);
-                if let Ok(mut slot) = label_entity.lock() {
-                    *slot = Some(label.entity());
-                }
-            }),
-        )
-        .checked(ParamWidgetBase::make_lens(
-            params,
-            params_to_param,
-            |param| param.modulated_normalized_value() >= 0.5,
-        ))
-    }
-
-    fn toggle_value(&self, cx: &mut EventContext) {
-        let current_value = self.param_base.unmodulated_normalized_value();
-        let new_value = if current_value >= 0.5 { 0.0 } else { 1.0 };
-
-        self.param_base.begin_set_parameter(cx);
-        self.param_base.set_normalized_value(cx, new_value);
-        self.param_base.end_set_parameter(cx);
-    }
-}
-
-impl View for SuggestButton {
-    fn element(&self) -> Option<&'static str> {
-        Some("param-button")
-    }
-
-    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
-        event.map(|window_event, meta| match window_event {
-            WindowEvent::MouseDown(MouseButton::Left)
-            | WindowEvent::MouseDoubleClick(MouseButton::Left)
-            | WindowEvent::MouseTripleClick(MouseButton::Left) => {
-                self.toggle_value(cx);
-                meta.consume();
-            }
-            WindowEvent::MouseScroll(_scroll_x, scroll_y) if self.use_scroll_wheel => {
-                self.scrolled_lines += scroll_y;
-
-                if self.scrolled_lines.abs() >= 1.0 {
-                    self.param_base.begin_set_parameter(cx);
-
-                    if self.scrolled_lines >= 1.0 {
-                        self.param_base.set_normalized_value(cx, 1.0);
-                        self.scrolled_lines -= 1.0;
-                    } else {
-                        self.param_base.set_normalized_value(cx, 0.0);
-                        self.scrolled_lines += 1.0;
-                    }
-
-                    self.param_base.end_set_parameter(cx);
-                }
-
-                meta.consume();
-            }
-            _ => {}
-        });
-    }
-}
 
 #[derive(Lens, Clone)]
 pub struct Data {
@@ -752,19 +666,28 @@ pub fn build_ui(
                     .with_label("Preview Cuts")
                     .class("preview-button");
 
+                // Suggest Settings Button (ZStack for dynamic label on top of ParamButton)
                 let suggest_label_entity_for_build = suggest_label_entity.clone();
-                SuggestButton::new(
-                    cx,
-                    Data::params,
-                    |params| &params.suggest_settings,
-                    suggest_label_entity_for_build,
-                    "Suggest Settings",
-                )
-                .class("suggest-button")
-                .toggle_class(
-                    "suggest-button-active",
-                    Data::params.map(|params| params.suggest_settings.value()),
-                );
+                ZStack::new(cx, |cx| {
+                    ParamButton::new(cx, Data::params, |params| &params.suggest_settings)
+                        .with_label("") // Empty label, we use the dynamic one on top
+                        .class("suggest-button")
+                        .toggle_class(
+                            "suggest-button-active",
+                            Data::params.map(|params| params.suggest_settings.value()),
+                        );
+
+                    let label = Label::new(cx, "Suggest Settings")
+                        .class("suggest-button-label")
+                        .hoverable(false)
+                        .disabled(true); // Let clicks pass through to button
+                    
+                    if let Ok(mut slot) = suggest_label_entity_for_build.lock() {
+                        *slot = Some(label.entity());
+                    }
+                })
+                .width(Auto)
+                .height(Auto);
             })
             .class("header-controls");
         })
