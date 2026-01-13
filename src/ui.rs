@@ -592,7 +592,7 @@ pub fn build_ui(
                     progress.target_seconds
                 )
             } else if params_for_timer.suggest_settings.value() {
-                "Waiting for audio...".to_string()
+                "Play Audio...".to_string()
             } else {
                 String::new()
             }
@@ -611,12 +611,12 @@ pub fn build_ui(
         let label_text = if params_for_timer.suggest_settings.value() {
             if let Ok(progress) = progress_for_timer.lock() {
                 if progress.active {
-                    "Learning...".to_string()
+                    "Listening...".to_string()
                 } else {
-                    "Waiting...".to_string()
+                    "Play Audio".to_string()
                 }
             } else {
-                "Learning...".to_string()
+                "Listening...".to_string()
             }
         } else if let Ok(mut applied) = applied_since_for_timer.lock() {
             if let Some(instant) = *applied {
