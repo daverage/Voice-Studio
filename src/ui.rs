@@ -487,7 +487,36 @@ impl View for SliderVisuals {
         ); // Border
 
         // 2. Draw Fill Bar
-        if normalized > 0.0 {
+        if self.param_id == ParamId::NoiseTone {
+            // Bipolar drawing for Tone
+            let center_x = bounds.x + bounds.w / 2.0;
+            let val_x = bounds.x + bounds.w * normalized;
+            
+            let (start_x, w) = if normalized >= 0.5 {
+                (center_x, val_x - center_x)
+            } else {
+                (val_x, center_x - val_x)
+            };
+
+            if w > 0.5 {
+                let mut fill = vg::Path::new();
+                fill.rounded_rect(start_x, bounds.y, w, bounds.h, 2.0);
+                
+                // Use a slightly different color or same blue
+                let fill_color = vg::Color::rgba(59, 130, 246, 180); 
+                canvas.fill_path(&fill, &vg::Paint::color(fill_color));
+                
+                // Cap line at value end
+                let mut cap = vg::Path::new();
+                cap.move_to(val_x, bounds.y);
+                cap.line_to(val_x, bounds.y + bounds.h);
+                canvas.stroke_path(
+                    &cap,
+                    &vg::Paint::color(vg::Color::rgb(96, 165, 250)).with_line_width(1.0),
+                );
+            }
+        } else if normalized > 0.0 {
+            // Standard Unipolar drawing
             let mut fill = vg::Path::new();
             fill.rounded_rect(bounds.x, bounds.y, bounds.w * normalized, bounds.h, 2.0);
 
