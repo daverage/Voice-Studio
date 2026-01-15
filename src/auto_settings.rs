@@ -39,10 +39,10 @@ const AUTO_SNR_DB_NOISY: f32 = 12.0;
 const AUTO_NOISE_MAX: f32 = 0.7;
 // Reverberance ratio (dB) below which no de-verb is suggested.
 // Increasing: de-verb triggers sooner; decreasing: requires more reverb to trigger.
-const AUTO_REVERB_DB_DRY: f32 = -18.0;
+const AUTO_REVERB_DB_DRY: f32 = -24.0;
 // Reverberance ratio (dB) at which de-verb reaches maximum suggestion.
 // Increasing: full de-verb at wetter audio; decreasing: full de-verb sooner.
-const AUTO_REVERB_DB_WET: f32 = -6.0;
+const AUTO_REVERB_DB_WET: f32 = -12.0;
 // Maximum de-verb suggestion cap.
 // Increasing: allows more de-verb; decreasing: caps de-verb lower.
 const AUTO_REVERB_MAX: f32 = 0.6;
