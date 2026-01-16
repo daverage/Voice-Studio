@@ -102,7 +102,6 @@ pub struct LinkedCompressor {
     // Metering / makeup tracking
     gain_reduction_envelope: f32,
     peak_gain_reduction_db: f32,
-    last_total_reduction_db: f32,
 }
 
 impl LinkedCompressor {
@@ -116,7 +115,6 @@ impl LinkedCompressor {
             sample_rate: sr,
             gain_reduction_envelope: 0.0,
             peak_gain_reduction_db: 0.0,
-            last_total_reduction_db: 0.0,
         }
     }
 
@@ -149,7 +147,6 @@ impl LinkedCompressor {
             self.noise_floor = NOISE_FLOOR_INIT;
             self.gain_reduction_envelope = 0.0;
             self.peak_gain_reduction_db = 0.0;
-            self.last_total_reduction_db = 0.0;
             return 1.0;
         }
 
@@ -245,7 +242,6 @@ impl LinkedCompressor {
         let red2_db = Self::soft_knee(over2, PEAK_TAMER_RATIO, PEAK_TAMER_KNEE_DB);
 
         let total_reduction_db = (red1_db + red2_db).max(0.0);
-        self.last_total_reduction_db = total_reduction_db;
         let gain = db_to_lin(-total_reduction_db);
 
         // ---------------------------------------------------------------------
@@ -277,9 +273,5 @@ impl LinkedCompressor {
 
     pub fn get_gain_reduction_db(&self) -> f32 {
         self.peak_gain_reduction_db
-    }
-
-    pub fn last_total_reduction_db(&self) -> f32 {
-        self.last_total_reduction_db
     }
 }

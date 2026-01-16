@@ -231,24 +231,6 @@ impl StreamingDeverber {
 
         self.output_consumer.pop().unwrap_or(0.0)
     }
-
-    pub fn reverb_metric(&self) -> f32 {
-        self.detector.last_reverb_metric()
-    }
-
-    pub fn analyze_sample(&mut self, input: f32, sample_rate: f32) {
-        let _ = self.input_producer.push(input);
-
-        if self.input_consumer.len() >= self.win_size {
-            for (i, v) in self.input_consumer.iter().take(self.win_size).enumerate() {
-                self.frame_in[i] = *v;
-            }
-
-            let _ = self.detector.analyze(&self.frame_in, 1.0, sample_rate);
-            self.input_consumer.discard(self.hop_size);
-            let _ = self.output_consumer.pop();
-        }
-    }
 }
 
 pub struct StereoDeverberDetector {
@@ -270,7 +252,6 @@ pub struct StereoDeverberDetector {
 
     frame_time: Vec<f32>,
     gain_smooth: Vec<f32>,
-    last_reverb_metric: f32,
 
     // Pre-allocated buffer for F0 autocorrelation (avoids audio-thread allocation)
     f0_scratch: Vec<f32>,
@@ -299,7 +280,6 @@ impl StereoDeverberDetector {
             gain_mask: vec![1.0; nyq + 1],
             frame_time: vec![0.0; win_size],
             gain_smooth: vec![1.0; nyq + 1],
-            last_reverb_metric: 0.0,
             f0_scratch: Vec::with_capacity(win_size),
         }
     }
@@ -410,23 +390,7 @@ impl StereoDeverberDetector {
         let _avg_gain = gain_sum / (nyq.max(1) as f32);
         let _min_gain = min_gain;
 
-        // Reverberance metric: late energy vs direct energy (linear ratio).
-        // Computed from analysis envelopes only, independent of strength.
-        let mut late_sum = 0.0;
-        let mut direct_sum = 0.0;
-        for i in 0..=nyq {
-            let mag = self.mag[i];
-            let late = self.late_env[i].min(mag);
-            late_sum += late;
-            direct_sum += (mag - late).max(0.0);
-        }
-        self.last_reverb_metric = late_sum / (direct_sum + REVERB_METRIC_EPS);
-
         &self.gain_mask
-    }
-
-    pub fn last_reverb_metric(&self) -> f32 {
-        self.last_reverb_metric
     }
 
     fn compute_masker_curve(&mut self) {

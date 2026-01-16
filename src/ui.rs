@@ -1,17 +1,13 @@
-use crate::auto_settings::{SuggestProgress, SuggestedSettings};
 use crate::meters::Meters;
-use crate::VoiceParams;
+use crate::{AutoSuggestTargets, VoiceParams};
 use nih_plug::params::Param;
 use nih_plug::prelude::BoolParam;
 use nih_plug::prelude::{GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
-use nih_plug_vizia::widgets::*;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
-use std::sync::Mutex;
-use std::sync::Arc;
-use std::time::Instant;
-use std::time::Duration;
+use nih_plug_vizia::widgets::*;
+use std::sync::{Arc, Mutex};
 
 // --- CSS STYLING ---
 const STYLE: &str = r#"
@@ -50,6 +46,7 @@ const STYLE: &str = r#"
     .header-controls {
         child-space: 1s;
         col-between: 8px;
+        padding-top: 6px;
     }
 
     .preview-button {
@@ -70,41 +67,6 @@ const STYLE: &str = r#"
         color: #ffffff;
     }
 
-    .suggest-button {
-        background-color: #0f172a;
-        border: 1px solid #334155;
-        border-radius: 6px;
-        color: #e2e8f0;
-        font-size: 11px;
-        min-width: 150px;
-        padding-left: 10px;
-        padding-right: 10px;
-        padding-top: 6px;
-        padding-bottom: 6px;
-    }
-
-    .suggest-button-active {
-        background-color: #16a34a;
-        border: 1px solid #22c55e;
-        color: #ffffff;
-    }
-
-    .suggest-button-label {
-        font-size: 11px;
-        color: inherit;
-    }
-
-    .suggest-button-label:disabled {
-        opacity: 1;
-        color: inherit;
-    }
-
-
-    .suggest-progress {
-        font-size: 10px;
-        color: #94a3b8;
-        margin-right: 8px;
-    }
     .preview-toggle {
         background-color: #0f172a;
         border: 1px solid #334155;
@@ -153,6 +115,11 @@ const STYLE: &str = r#"
         text-align: center;
         margin-bottom: 5px;
     }
+
+    .delta-label {
+        font-size: 9px;
+        color: #64748b;
+    }
 "#;
 
 #[derive(Lens, Clone)]
@@ -162,53 +129,29 @@ pub struct Data {
 
 impl Model for Data {}
 
-fn apply_suggested_settings(
+// Single write path for Auto-Suggest parameter updates.
+fn apply_auto_suggest_targets(
     params: &Arc<VoiceParams>,
     gui_context: &Arc<dyn GuiContext>,
-    applied_since: &Arc<Mutex<Option<Instant>>>,
-    settings: SuggestedSettings,
+    targets: AutoSuggestTargets,
 ) {
     let setter = ParamSetter::new(gui_context.as_ref());
 
     setter.begin_set_parameter(&params.noise_reduction);
-    setter.set_parameter(&params.noise_reduction, settings.noise_reduction);
+    setter.set_parameter(&params.noise_reduction, targets.noise_reduction.value);
     setter.end_set_parameter(&params.noise_reduction);
 
-    setter.begin_set_parameter(&params.noise_tone);
-    setter.set_parameter(&params.noise_tone, settings.noise_tone);
-    setter.end_set_parameter(&params.noise_tone);
-
     setter.begin_set_parameter(&params.reverb_reduction);
-    setter.set_parameter(&params.reverb_reduction, settings.reverb_reduction);
+    setter.set_parameter(&params.reverb_reduction, targets.reverb_reduction.value);
     setter.end_set_parameter(&params.reverb_reduction);
 
-    setter.begin_set_parameter(&params.mud_reduction);
-    setter.set_parameter(&params.mud_reduction, settings.mud_reduction);
-    setter.end_set_parameter(&params.mud_reduction);
-
-    setter.begin_set_parameter(&params.proximity);
-    setter.set_parameter(&params.proximity, settings.proximity);
-    setter.end_set_parameter(&params.proximity);
-
-    setter.begin_set_parameter(&params.de_esser);
-    setter.set_parameter(&params.de_esser, settings.de_esser);
-    setter.end_set_parameter(&params.de_esser);
-
     setter.begin_set_parameter(&params.leveler);
-    setter.set_parameter(&params.leveler, settings.leveler);
+    setter.set_parameter(&params.leveler, targets.leveler.value);
     setter.end_set_parameter(&params.leveler);
 
-    setter.begin_set_parameter(&params.output_gain);
-    setter.set_parameter(&params.output_gain, settings.output_gain_db);
-    setter.end_set_parameter(&params.output_gain);
-
-    setter.begin_set_parameter(&params.suggest_settings);
-    setter.set_parameter(&params.suggest_settings, false);
-    setter.end_set_parameter(&params.suggest_settings);
-
-    if let Ok(mut slot) = applied_since.lock() {
-        *slot = Some(Instant::now());
-    }
+    setter.begin_set_parameter(&params.de_esser);
+    setter.set_parameter(&params.de_esser, targets.de_esser.value);
+    setter.end_set_parameter(&params.de_esser);
 }
 
 // --- COMPONENT: LEVEL METER ---
@@ -313,11 +256,78 @@ impl View for LevelMeter {
         for i in 1..20 {
             let y_pos = bounds.y + (i as f32 * step);
             line_path.move_to(bounds.x, y_pos);
-            line_path.line_to(bounds.x + bounds.w, y_pos);
+            line_path.line_to(cx.bounds().x + bounds.w, y_pos);
         }
         canvas.stroke_path(
             &line_path,
             &vg::Paint::color(vg::Color::rgba(0, 0, 0, 100)).with_line_width(1.0),
+        );
+    }
+}
+
+// --- COMPONENT: DELTA ACTIVITY ---
+
+pub struct DeltaActivityLight {
+    meters: Arc<Meters>,
+    level: DeltaLevel,
+}
+
+#[derive(Clone, Copy)]
+pub enum DeltaLevel {
+    Idle,
+    Light,
+    Heavy,
+}
+
+impl DeltaActivityLight {
+    pub fn new(
+        cx: &mut Context,
+        meters: Arc<Meters>,
+        level: DeltaLevel,
+    ) -> Handle<'_, Self> {
+        Self { meters, level }.build(cx, |_| {})
+    }
+}
+
+impl View for DeltaActivityLight {
+    fn element(&self) -> Option<&'static str> {
+        Some("delta-activity-light")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let bounds = cx.bounds();
+        let activity = self.meters.get_delta_activity();
+        let active_level = if activity < 0.5 {
+            DeltaLevel::Idle
+        } else if activity < 1.5 {
+            DeltaLevel::Light
+        } else {
+            DeltaLevel::Heavy
+        };
+        let is_active = matches!(
+            (self.level, active_level),
+            (DeltaLevel::Idle, DeltaLevel::Idle)
+                | (DeltaLevel::Light, DeltaLevel::Light)
+                | (DeltaLevel::Heavy, DeltaLevel::Heavy)
+        );
+
+        let mut path = vg::Path::new();
+        path.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 2.0);
+
+        let inactive = vg::Color::rgb(30, 41, 59);
+        let active = match self.level {
+            DeltaLevel::Idle => vg::Color::rgb(148, 163, 184),
+            DeltaLevel::Light => vg::Color::rgb(250, 204, 21),
+            DeltaLevel::Heavy => vg::Color::rgb(239, 68, 68),
+        };
+
+        canvas.fill_path(
+            &path,
+            &vg::Paint::color(if is_active { active } else { inactive }),
+        );
+        canvas.stroke_path(
+            &path,
+            &vg::Paint::color(vg::Color::rgb(51, 65, 85)).with_line_width(1.0),
         );
     }
 }
@@ -335,7 +345,7 @@ pub enum ParamId {
     NoiseReduction,
     NoiseTone,
     ReverbReduction,
-    MudReduction,
+    Clarity,
     Proximity,
     DeEsser,
     Leveler,
@@ -346,7 +356,7 @@ pub enum ParamId {
 pub enum PreviewParamId {
     NoiseReduction,
     ReverbReduction,
-    MudReduction,
+    Clarity,
     Proximity,
     DeEsser,
     Leveler,
@@ -357,7 +367,7 @@ fn preview_param_for<'a>(params: &'a Arc<VoiceParams>, id: PreviewParamId) -> &'
     match id {
         PreviewParamId::NoiseReduction => &params.preview_noise_reduction,
         PreviewParamId::ReverbReduction => &params.preview_reverb_reduction,
-        PreviewParamId::MudReduction => &params.preview_mud_reduction,
+        PreviewParamId::Clarity => &params.preview_clarity,
         PreviewParamId::Proximity => &params.preview_proximity,
         PreviewParamId::DeEsser => &params.preview_de_esser,
         PreviewParamId::Leveler => &params.preview_leveler,
@@ -384,7 +394,7 @@ impl View for SliderVisuals {
             ParamId::NoiseReduction => self.params.noise_reduction.modulated_normalized_value(),
             ParamId::NoiseTone => self.params.noise_tone.modulated_normalized_value(),
             ParamId::ReverbReduction => self.params.reverb_reduction.modulated_normalized_value(),
-            ParamId::MudReduction => self.params.mud_reduction.modulated_normalized_value(),
+            ParamId::Clarity => self.params.clarity.modulated_normalized_value(),
             ParamId::Proximity => self.params.proximity.modulated_normalized_value(),
             ParamId::DeEsser => self.params.de_esser.modulated_normalized_value(),
             ParamId::Leveler => self.params.leveler.modulated_normalized_value(),
@@ -405,7 +415,7 @@ impl View for SliderVisuals {
             // Bipolar drawing for Tone
             let center_x = bounds.x + bounds.w / 2.0;
             let val_x = bounds.x + bounds.w * normalized;
-            
+
             let (start_x, w) = if normalized >= 0.5 {
                 (center_x, val_x - center_x)
             } else {
@@ -415,11 +425,11 @@ impl View for SliderVisuals {
             if w > 0.5 {
                 let mut fill = vg::Path::new();
                 fill.rounded_rect(start_x, bounds.y, w, bounds.h, 2.0);
-                
+
                 // Use a slightly different color or same blue
-                let fill_color = vg::Color::rgba(59, 130, 246, 180); 
+                let fill_color = vg::Color::rgba(59, 130, 246, 180);
                 canvas.fill_path(&fill, &vg::Paint::color(fill_color));
-                
+
                 // Cap line at value end
                 let mut cap = vg::Path::new();
                 cap.move_to(val_x, bounds.y);
@@ -476,18 +486,14 @@ where
     VStack::new(cx, move |cx| {
         // 1. Text Row (Label ----- Value)
         HStack::new(cx, move |cx| {
-            Label::new(cx, label_text).class("slider-label").text_wrap(true);
+            Label::new(cx, label_text)
+                .class("slider-label")
+                .text_wrap(false);
             Element::new(cx).width(Stretch(1.0));
-            let value_lens = ParamWidgetBase::make_lens(
-                Data::params,
-                params_to_param,
-                |param: &P| {
-                    param.normalized_value_to_string(
-                        param.unmodulated_normalized_value(),
-                        true,
-                    )
-                },
-            );
+            let value_lens =
+                ParamWidgetBase::make_lens(Data::params, params_to_param, |param: &P| {
+                    param.normalized_value_to_string(param.unmodulated_normalized_value(), true)
+                });
             Label::new(cx, value_lens)
                 .class("slider-value")
                 .width(Pixels(60.0));
@@ -542,9 +548,9 @@ pub fn build_ui(
     cx: &mut Context,
     params: Arc<VoiceParams>,
     meters: Arc<Meters>,
-    suggested_settings: Arc<Mutex<Option<SuggestedSettings>>>,
-    suggest_progress: Arc<Mutex<SuggestProgress>>,
-    gui_context: Arc<dyn GuiContext>,
+    _suggested_settings: Arc<Mutex<Option<AutoSuggestTargets>>>,
+    _ui_proxy: Arc<Mutex<Option<ContextProxy>>>,
+    _gui_context: Arc<dyn GuiContext>,
 ) {
     // Inject CSS
     let _ = cx.add_stylesheet(STYLE);
@@ -554,97 +560,6 @@ pub fn build_ui(
         params: params.clone(),
     }
     .build(cx);
-    let params_for_timer = params.clone();
-    let suggested_for_timer = suggested_settings.clone();
-    let gui_for_timer = gui_context.clone();
-    let progress_for_timer = suggest_progress.clone();
-    let progress_entity = Arc::new(Mutex::new(None));
-    let progress_entity_for_timer = progress_entity.clone();
-    let suggest_label_entity = Arc::new(Mutex::new(None));
-    let suggest_label_entity_for_timer = suggest_label_entity.clone();
-    let applied_since = Arc::new(Mutex::new(None));
-    let applied_since_for_timer = applied_since.clone();
-
-    let timer = cx.add_timer(
-        Duration::from_millis(200),
-        Some(Duration::from_millis(200)),
-        move |cx, action| {
-            if !matches!(action, TimerAction::Tick(_)) {
-                return;
-            }
-
-        if let Ok(mut slot) = suggested_for_timer.lock() {
-            if let Some(settings) = slot.take() {
-                apply_suggested_settings(
-                    &params_for_timer,
-                    &gui_for_timer,
-                    &applied_since_for_timer,
-                    settings,
-                );
-            }
-        }
-
-        let text = if let Ok(progress) = progress_for_timer.lock() {
-            if progress.active && progress.target_seconds > 0.0 {
-                format!(
-                    "Analyzing {:>2.0}s / {:>2.0}s",
-                    progress.seconds.ceil().min(progress.target_seconds),
-                    progress.target_seconds
-                )
-            } else if params_for_timer.suggest_settings.value() {
-                "Play Audio...".to_string()
-            } else {
-                String::new()
-            }
-        } else {
-            String::new()
-        };
-
-        if let Ok(progress_entity) = progress_entity_for_timer.lock() {
-            if let Some(entity) = *progress_entity {
-                cx.with_current(entity, |cx| {
-                    cx.set_text(&text);
-                });
-            }
-        }
-
-        let label_text = if params_for_timer.suggest_settings.value() {
-            if let Ok(progress) = progress_for_timer.lock() {
-                if progress.active {
-                    "Listening...".to_string()
-                } else {
-                    "Play Audio".to_string()
-                }
-            } else {
-                "Listening...".to_string()
-            }
-        } else if let Ok(mut applied) = applied_since_for_timer.lock() {
-            if let Some(instant) = *applied {
-                let elapsed = instant.elapsed();
-                if elapsed < Duration::from_millis(500) {
-                    "Applying...".to_string()
-                } else if elapsed < Duration::from_millis(1800) {
-                    "Applied".to_string()
-                } else {
-                    *applied = None;
-                    "Suggest Settings".to_string()
-                }
-            } else {
-                "Suggest Settings".to_string()
-            }
-        } else {
-            "Suggest Settings".to_string()
-        };
-
-        if let Ok(label_entity) = suggest_label_entity_for_timer.lock() {
-            if let Some(entity) = *label_entity {
-                cx.with_current(entity, |cx| {
-                    cx.set_text(&label_text);
-                });
-            }
-        }
-    });
-    cx.start_timer(timer);
 
     // Main Container
     VStack::new(cx, move |cx| {
@@ -652,52 +567,26 @@ pub fn build_ui(
         HStack::new(cx, |cx| {
             VStack::new(cx, |cx| {
                 Label::new(cx, "VOICE STUDIO").class("header-title");
-                Label::new(cx, "Intelligent Vocal Restoration").class("header-sub");
+                Label::new(cx, "Vocal Restoration & Enhancement").class("header-sub");
             })
             .width(Stretch(1.0));
-
-            let progress_label = Label::new(cx, "").class("suggest-progress");
-            if let Ok(mut slot) = progress_entity.lock() {
-                *slot = Some(progress_label.entity());
-            }
 
             HStack::new(cx, |cx| {
                 ParamButton::new(cx, Data::params, |params| &params.preview_cuts)
                     .with_label("Preview Cuts")
                     .class("preview-button");
-
-                // Suggest Settings Button (ZStack for dynamic label on top of ParamButton)
-                let suggest_label_entity_for_build = suggest_label_entity.clone();
-                ZStack::new(cx, |cx| {
-                    ParamButton::new(cx, Data::params, |params| &params.suggest_settings)
-                        .with_label("") // Empty label, we use the dynamic one on top
-                        .class("suggest-button")
-                        .toggle_class(
-                            "suggest-button-active",
-                            Data::params.map(|params| params.suggest_settings.value()),
-                        );
-
-                    let label = Label::new(cx, "Suggest Settings")
-                        .class("suggest-button-label")
-                        .hoverable(false)
-                        .disabled(true); // Let clicks pass through to button
-                    
-                    if let Ok(mut slot) = suggest_label_entity_for_build.lock() {
-                        *slot = Some(label.entity());
-                    }
-                })
-                .width(Auto)
-                .height(Auto);
             })
             .class("header-controls");
         })
         .class("header");
 
         // --- MAIN CONTENT GRID ---
+        let meters_for_main = meters.clone();
+
         HStack::new(cx, move |cx| {
-            let meters_in = meters.clone();
-            let meters_gr = meters.clone();
-            let meters_out = meters.clone();
+            let meters_in = meters_for_main.clone();
+            let meters_gr = meters_for_main.clone();
+            let meters_out = meters_for_main.clone();
             let params_clean = params.clone();
             let params_polish = params.clone();
             // COLUMN 1: LEVELS
@@ -749,6 +638,32 @@ pub fn build_ui(
                 })
                 .col_between(Pixels(10.0))
                 .height(Pixels(200.0)); // Fixed height for meters
+
+                Label::new(cx, "DELTA ACTIVITY").class("meter-label");
+                HStack::new(cx, move |cx| {
+                    let meters_delta = meters.clone();
+                    VStack::new(cx, move |cx| {
+                        DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Idle)
+                            .width(Pixels(12.0))
+                            .height(Pixels(8.0));
+                        Label::new(cx, "Idle").class("delta-label");
+                    });
+                    let meters_delta = meters.clone();
+                    VStack::new(cx, move |cx| {
+                        DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Light)
+                            .width(Pixels(12.0))
+                            .height(Pixels(8.0));
+                        Label::new(cx, "Light").class("delta-label");
+                    });
+                    let meters_delta = meters.clone();
+                    VStack::new(cx, move |cx| {
+                        DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Heavy)
+                            .width(Pixels(12.0))
+                            .height(Pixels(8.0));
+                        Label::new(cx, "Heavy").class("delta-label");
+                    });
+                })
+                .col_between(Pixels(10.0));
             })
             .width(Stretch(1.0));
 
@@ -784,11 +699,11 @@ pub fn build_ui(
                 );
                 create_modern_slider(
                     cx,
-                    "Mud",
+                    "Clarity",
                     params_clean,
-                    ParamId::MudReduction,
-                    Some(PreviewParamId::MudReduction),
-                    |p| &p.mud_reduction,
+                    ParamId::Clarity,
+                    Some(PreviewParamId::Clarity),
+                    |p| &p.clarity,
                 );
             })
             .width(Stretch(1.0));
