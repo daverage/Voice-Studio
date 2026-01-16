@@ -13,7 +13,6 @@ use nih_plug_vizia::vizia::prelude::ContextProxy;
 use std::sync::{Arc, Mutex};
 use ui::build_ui;
 
-const AUTO_RMS_TAU_SEC: f32 = 0.02;
 const DE_ESS_RMS_TAU_SEC: f32 = 0.01;
 
 #[derive(Clone, Copy, Default)]

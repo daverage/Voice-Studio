@@ -129,6 +129,7 @@ pub struct Data {
 
 impl Model for Data {}
 
+#[allow(dead_code)]
 // Single write path for Auto-Suggest parameter updates.
 fn apply_auto_suggest_targets(
     params: &Arc<VoiceParams>,

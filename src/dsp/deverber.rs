@@ -73,9 +73,6 @@ const FLOOR_CLAMP_MAX: f32 = 0.92;
 const GAIN_SMOOTH_ATTACK: f32 = 0.35;
 // Increasing release: faster gain fall; decreasing: slower fall.
 const GAIN_SMOOTH_RELEASE: f32 = 0.06;
-// Reverb metric epsilon for late/direct ratio.
-// Increasing: more conservative in silence; decreasing: closer to raw.
-const REVERB_METRIC_EPS: f32 = 1e-12;
 // Harmonic protection max frequency (Hz).
 // Increasing: protects more HF harmonics; decreasing: protects fewer.
 const HARMONIC_PROTECT_MAX_HZ: f32 = 6000.0;
