@@ -1,3 +1,31 @@
+//! Shared DSP utilities for Voice Studio.
+//!
+//! This module contains centralized constants and functions used across multiple
+//! DSP modules to avoid code duplication. All functions in this module are safe
+//! for use in the audio thread (no allocations, no blocking).
+//!
+//! ## Important: Audio Thread Safety
+//! - `estimate_f0_autocorr()` requires a pre-allocated scratch buffer
+//! - `make_sqrt_hann_window()` allocates and should only be called during initialization
+
+use std::f32::consts::PI;
+
+// =============================================================================
+// Shared Constants
+// =============================================================================
+
+/// Floor value for magnitude calculations (avoids log(0))
+pub const MAG_FLOOR: f32 = 1e-12;
+
+/// Epsilon for dB conversions and ratio calculations
+pub const DB_EPS: f32 = 1e-12;
+
+/// Amount below which effect is bypassed (avoids near-zero processing)
+pub const BYPASS_AMOUNT_EPS: f32 = 0.001;
+
+// =============================================================================
+// Basic Math Utilities
+// =============================================================================
 
 pub fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t.clamp(0.0, 1.0)
@@ -17,16 +45,68 @@ pub fn db_to_gain(db: f32) -> f32 {
     (10.0f32).powf(db / 20.0)
 }
 
+/// Convert linear amplitude to decibels
+#[inline]
+pub fn lin_to_db(x: f32) -> f32 {
+    20.0 * x.max(DB_EPS).log10()
+}
+
+/// Convert decibels to linear amplitude (alias for db_to_gain)
+#[inline]
+pub fn db_to_lin(db: f32) -> f32 {
+    10.0f32.powf(db / 20.0)
+}
+
+// =============================================================================
+// DSP Utilities
+// =============================================================================
+
+/// Generate a sqrt-Hann window for WOLA (Weighted Overlap-Add) processing.
+/// This window type allows perfect reconstruction when used for both analysis and synthesis.
+pub fn make_sqrt_hann_window(size: usize) -> Vec<f32> {
+    (0..size)
+        .map(|i| {
+            let hann = 0.5 * (1.0 - (2.0 * PI * i as f32 / size as f32).cos());
+            hann.sqrt()
+        })
+        .collect()
+}
+
+/// Convert time in milliseconds to exponential smoothing coefficient.
+/// Used for envelope followers with attack/release characteristics.
+#[inline]
+pub fn time_constant_coeff(time_ms: f32, sample_rate: f32) -> f32 {
+    (-1.0 / (time_ms * 0.001 * sample_rate)).exp()
+}
+
+/// Attack/release envelope follower for squared values (RMS detection).
+/// Returns updated envelope value based on whether input is rising or falling.
+#[inline]
+pub fn update_env_sq(env_sq: f32, in_sq: f32, attack: f32, release: f32) -> f32 {
+    if in_sq > env_sq {
+        attack * env_sq + (1.0 - attack) * in_sq
+    } else {
+        release * env_sq + (1.0 - release) * in_sq
+    }
+}
+
+// =============================================================================
+// Analysis Utilities
+// =============================================================================
+
 /// Autocorrelation-based F0 estimation (lightweight, speech-focused).
 /// Returns (periodicity 0..1, f0_hz).
-pub fn estimate_f0_autocorr(frame: &[f32], sample_rate: f32) -> (f32, f32) {
+///
+/// `scratch` must have capacity >= frame.len(). It will be cleared and reused
+/// to avoid audio-thread allocations.
+pub fn estimate_f0_autocorr(frame: &[f32], scratch: &mut Vec<f32>, sample_rate: f32) -> (f32, f32) {
     let n = frame.len();
     if n < 128 {
         return (0.0, 0.0);
     }
 
-    // Remove DC + simple pre-emphasis
-    let mut x: Vec<f32> = Vec::with_capacity(n);
+    // Remove DC + simple pre-emphasis - reuse scratch buffer
+    scratch.clear();
     let mut mean = 0.0f32;
     for &v in frame {
         mean += v;
@@ -38,12 +118,13 @@ pub fn estimate_f0_autocorr(frame: &[f32], sample_rate: f32) -> (f32, f32) {
         let d = v - mean;
         let y = d - 0.97 * prev;
         prev = d;
-        x.push(y);
+        scratch.push(y);
     }
+    let x = scratch;
 
     // Energy gate
     let mut e0 = 0.0f32;
-    for &v in &x {
+    for &v in x.iter() {
         e0 += v * v;
     }
     if e0 < 1e-6 {

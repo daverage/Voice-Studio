@@ -1,3 +1,44 @@
+//! Streaming Deverber (Late Reflection Suppression)
+//!
+//! # RESPONSIBILITY BOUNDARY: Late Reflections Only
+//!
+//! This module handles LATE reverb tail and diffuse room decay (>50ms):
+//! - Room ambience and "wash"
+//! - Diffuse tail that makes speech sound distant
+//! - Long decay that reduces intelligibility
+//!
+//! This module DOES NOT handle:
+//! - Short-lag reflections (0-20ms) - owned by `EarlyReflectionSuppressor`
+//! - Desk/wall coloration - owned by `EarlyReflectionSuppressor`
+//! - Distinct flutter echoes - not modeled
+//!
+//! ## Avoiding Double-Reaction
+//!
+//! Both this module and `EarlyReflectionSuppressor` respond to "distance" cues, but
+//! they target different time regions:
+//! - Early reflections (0-20ms): Cause coloration/boxiness
+//! - Late reflections (>50ms): Cause diffuse room sound
+//!
+//! The signal chain order (early reflection → denoise → deverb) ensures each
+//! processor sees appropriate input without double-processing the same artifact.
+//!
+//! # Perceptual Contract
+//! - **Target Source**: Speech in reverberant environments (rooms, halls).
+//! - **Intended Effect**: Reduce late reverberation tail and diffuse room sound to "tighten" the voice.
+//! - **Failure Modes**:
+//!   - Dryness / artificiality if over-processed.
+//!   - "Gated" silence if envelope follower is too fast.
+//!   - Loss of natural phrase endings (sustain).
+//! - **Will Not Do**:
+//!   - Remove distinct echoes (flutter echo).
+//!   - Suppress early reflections (handled by `EarlyReflectionSuppressor`).
+//!
+//! # Lifecycle
+//! - **Learning**: No specific learning phase (instant reaction).
+//! - **Active**: Normal operation.
+//! - **Holding**: Uses `Holding` state implicitly during silence to prevent release envelope drift.
+//! - **Bypassed**: Passes audio through.
+
 use crate::dsp::utils::{
     estimate_f0_autocorr, lerp, make_sqrt_hann_window, max3, smoothstep, BYPASS_AMOUNT_EPS,
     MAG_FLOOR,
@@ -93,11 +134,28 @@ const MASKER_RADIUS_BINS: isize = 20;
 const MASKER_FALLOFF_DENOM: f32 = 8.0;
 
 /// Mono streaming deverber using WOLA.
+///
+/// ## Metric Ownership (EXCLUSIVE)
+/// This module OWNS and is responsible for:
+/// - **Early/Late ratio**: Moves toward target range (0.50 - 0.70)
+/// - **Decay slope**: Reduces toward target range (-0.0001 to +0.0001)
+///
+/// ## Dynamics Ownership Boundary
+/// - **DOES NOT OWN**: RMS, crest factor, RMS variance (these are owned by `LinkedCompressor`/Leveler)
+/// - **COORDINATION**: Works in series with Leveler - receives pre-processed signal, applies reverb reduction,
+///   then Leveler applies final dynamics control
+/// - **NO OVERLAP**: Does not attempt to control loudness or macro dynamics that belong to Leveler
+///
+/// This module must NOT attempt to modify:
+/// - RMS, crest factor, RMS variance (owned by Leveler)
+/// - Noise floor, SNR (owned by Denoiser)
+/// - Presence/Air ratios (owned by Proximity + Clarity)
+/// - HF variance (read-only guardrail metric)
 pub struct StreamingDeverber {
     detector: StereoDeverberDetector, // Reusing the existing detector logic
     fft: Arc<dyn Fft<f32>>,
     ifft: Arc<dyn Fft<f32>>,
-    
+
     win_size: usize,
     hop_size: usize,
     window: Vec<f32>,
@@ -116,7 +174,7 @@ pub struct StreamingDeverber {
 impl StreamingDeverber {
     pub fn new(win_size: usize, hop_size: usize) -> Self {
         let detector = StereoDeverberDetector::new(win_size, hop_size);
-        
+
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(win_size);
         let ifft = planner.plan_fft_inverse(win_size);
@@ -172,18 +230,18 @@ impl StreamingDeverber {
             // The detector does FFT internally too?
             // StereoDeverberDetector::analyze does FFT on the input frame.
             // So we can reuse that if the detector exposed it, but it computes gains.
-            
+
             // Let's run analysis
             let gains = self.detector.analyze(&self.frame_in, amount, sample_rate); // This mutates detector
-            
+
             // Now we do the application WOLA
-            
+
             // 1. Window + FFT
             for i in 0..self.win_size {
                 self.scratch[i] = Complex::new(self.frame_in[i] * self.window[i], 0.0);
             }
             self.fft.process(&mut self.scratch);
-            
+
             // 2. Apply gains
             let nyq = self.win_size / 2;
             for i in 0..=nyq {
@@ -201,7 +259,7 @@ impl StreamingDeverber {
             // 3. IFFT + Overlap
             self.ifft.process(&mut self.scratch);
             let norm = 1.0 / self.win_size as f32;
-            
+
             for i in 0..self.win_size {
                 let w = self.window[i];
                 let y = self.scratch[i].re * norm * w;
@@ -286,6 +344,19 @@ impl StereoDeverberDetector {
         let nyq = n / 2;
         let sr = sample_rate;
 
+        // Buffer size assertions for real-time safety
+        debug_assert_eq!(mono.len(), n, "Input mono buffer size mismatch");
+        debug_assert_eq!(self.scratch.len(), n, "Scratch buffer size mismatch");
+        debug_assert_eq!(self.frame_time.len(), n, "Frame time buffer size mismatch");
+        debug_assert_eq!(self.window.len(), n, "Window buffer size mismatch");
+        debug_assert_eq!(self.mag.len(), nyq + 1, "Magnitude buffer size mismatch");
+        debug_assert_eq!(self.prev_mag.len(), nyq + 1, "Previous magnitude buffer size mismatch");
+        debug_assert_eq!(self.late_env.len(), nyq + 1, "Late envelope buffer size mismatch");
+        debug_assert_eq!(self.early_hold.len(), nyq + 1, "Early hold buffer size mismatch");
+        debug_assert_eq!(self.masker.len(), nyq + 1, "Masker buffer size mismatch");
+        debug_assert_eq!(self.gain_mask.len(), nyq + 1, "Gain mask buffer size mismatch");
+        debug_assert_eq!(self.gain_smooth.len(), nyq + 1, "Gain smooth buffer size mismatch");
+
         // Window + FFT
         for i in 0..n {
             self.frame_time[i] = mono[i];
@@ -300,9 +371,8 @@ impl StereoDeverberDetector {
 
         // Voicing
         let (periodicity, f0) = estimate_f0_autocorr(&self.frame_time, &mut self.f0_scratch, sr);
-        let voiced = periodicity > VOICED_PERIODICITY_MIN
-            && f0 > VOICED_F0_MIN_HZ
-            && f0 < VOICED_F0_MAX_HZ;
+        let voiced =
+            periodicity > VOICED_PERIODICITY_MIN && f0 > VOICED_F0_MIN_HZ && f0 < VOICED_F0_MAX_HZ;
 
         // Spectral flux
         let mut flux = 0.0;
@@ -312,8 +382,11 @@ impl StereoDeverberDetector {
             energy += self.mag[i];
         }
 
-        let transient =
-            smoothstep(TRANSIENT_FLUX_MIN, TRANSIENT_FLUX_MAX, flux / (energy + MAG_FLOOR));
+        let transient = smoothstep(
+            TRANSIENT_FLUX_MIN,
+            TRANSIENT_FLUX_MAX,
+            flux / (energy + MAG_FLOOR),
+        );
 
         self.compute_masker_curve();
 
@@ -420,6 +493,12 @@ impl StereoDeverberDetector {
         strength: f32,
     ) -> f32 {
         if f0 <= 0.0 {
+            return gain;
+        }
+
+        // Bounds check to prevent out-of-bounds access
+        let nyq = self.win_size / 2;
+        if bin > nyq {
             return gain;
         }
 

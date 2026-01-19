@@ -1,6 +1,81 @@
-use crate::dsp::utils::{
-    db_to_lin, lin_to_db, time_constant_coeff, update_env_sq, DB_EPS,
-};
+//! Linked Compressor (Leveler)
+//!
+//! # Perceptual Contract
+//! - **Target Source**: Dynamic speech with inconsistent levels.
+//! - **Intended Effect**: Transparent leveling of macroscopic volume changes (consistency).
+//! - **Failure Modes**:
+//!   - "Pumping" or "breathing" if release is too fast for the gain reduction amount.
+//!   - Raising background noise floor during pauses.
+//! - **Will Not Do**:
+//!   - Brickwall limiting (handled by Limiter).
+//!   - Transient shaping (attack is relatively slow to preserve consonants).
+//!
+//! # Lifecycle
+//! - **Active**: Normal operation.
+//! - **Bypassed**: Passes audio through.
+//!
+//! # Loudness Target Philosophy
+//! The goal of this module is "perceived conversational consistency" rather than strict LUFS
+//! matching or broadcast compliance. It aims to make speech feel stable and effortless to
+//! listen to in varied environments (e.g. mobile speakers, noisy rooms) without the fatigue
+//! caused by excessive pumping or unnatural density.
+//!
+//! # Gain Staging
+//! 1. **Pre-Leveler**: Input arrives after restoration (denoise/de-verb) and shaping (clarity/proximity).
+//! 2. **Leveler Stage**: Transparently manages macroscopic volume changes using a hybrid RMS+Peak detector.
+//! 3. **Post-Leveler**: Output gain is applied after leveling to bring the signal into the final range.
+//! 4. **Limiter**: Purely for safety; it does not contribute to the "sound" or "tone" of the plugin.
+//!
+//! # DYNAMICS OWNERSHIP BOUNDARY (Critical)
+//!
+//! This module is the AUTHORITATIVE long-term gain controller. It owns:
+//! - RMS target (0.045 - 0.060)
+//! - Crest factor maintenance (23.0 - 27.0 dB)
+//! - RMS variance reduction (≤ 0.0015)
+//!
+//! ## Hard Rule: Speech Envelope Exclusion
+//!
+//! The shared `SpeechSidechain` envelope from `SpeechConfidenceEstimator` MUST NOT:
+//! - Drive gain reduction directly
+//! - Be the source of truth for level detection
+//! - Replace the internal RMS/Peak envelope followers
+//!
+//! The speech envelope MAY only be used to:
+//! - Gate dynamics behavior (e.g., hold gain during detected silence)
+//! - Bias reaction speed (slower release during speech transitions)
+//! - Prevent reactions during silence (makeup gain gating)
+//!
+//! Currently this module does NOT read the shared speech envelope, which is CORRECT.
+//! The internal noise floor tracking and gating is sufficient and independent.
+//!
+//! ## Rationale
+//!
+//! If the speech envelope drove dynamics directly, it would create a hidden feedback
+//! loop where restoration affects speech detection which affects leveling which affects
+//! the signal that restoration sees. This leads to pumping and gain fighting.
+
+use crate::dsp::utils::{db_to_lin, lin_to_db, time_constant_coeff, update_env_sq, DB_EPS};
+
+// =============================================================================
+// Data-Driven Calibration Constants (Task 4)
+// =============================================================================
+
+/// Crest factor threshold below which we slow attack and reduce ratio
+/// From spec: "If crest < 22 dB → slow attack / reduce ratio"
+const CREST_ADAPTATION_THRESHOLD_DB: f32 = 22.0;
+
+/// Attack multiplier when crest is low (slower attack preserves dynamics)
+const LOW_CREST_ATTACK_MULT: f32 = 1.5;
+
+/// Ratio reduction factor when crest is low (gentler compression)
+const LOW_CREST_RATIO_MULT: f32 = 0.7;
+
+/// RMS variance threshold above which we increase smoothing
+/// From spec: "If RMS variance > target → increase smoothing"
+const RMS_VARIANCE_THRESHOLD: f32 = 0.0015;
+
+/// Release multiplier when RMS variance is high (more smoothing)
+const HIGH_VARIANCE_RELEASE_MULT: f32 = 1.3;
 
 // Constants: unless marked "Must not change", these are tunable for behavior.
 // Initial noise floor estimate for gating.
@@ -81,10 +156,21 @@ const COMPRESSOR_BYPASS_EPS: f32 = 0.01;
 /// Stereo-linked VO compressor with automatic makeup gain.
 /// Drop-in replacement for the existing LinkedCompressor.
 ///
-/// Public API preserved:
-/// - new(sr)
-/// - compute_gain(input_l, input_r, amount) -> gain
-/// - get_gain_reduction_db()
+/// ## Metric Ownership (EXCLUSIVE)
+/// This module OWNS and is responsible for:
+/// - **RMS**: Moves toward target range (0.045 - 0.060)
+/// - **Crest factor**: Maintains target range (23.0 - 27.0 dB)
+/// - **RMS variance**: Reduces toward target (≤ 0.0015)
+///
+/// This module must NOT attempt to modify:
+/// - Noise floor (owned by Denoiser)
+/// - Early/Late ratio (owned by De-reverb)
+/// - Presence/Air ratios (owned by Proximity + Clarity)
+/// - HF variance (read-only guardrail metric)
+///
+/// ## Data-Driven Calibration
+/// - Adapts attack/ratio based on crest factor
+/// - Adapts release/smoothing based on RMS variance
 pub struct LinkedCompressor {
     // RMS envelope (squared) per channel
     env_sq_l: f32,
@@ -102,10 +188,19 @@ pub struct LinkedCompressor {
     // Metering / makeup tracking
     gain_reduction_envelope: f32,
     peak_gain_reduction_db: f32,
+
+    // Data-driven adaptation (from AudioProfile)
+    // Smoothed to prevent sudden changes
+    crest_factor_db: f32,
+    rms_variance: f32,
+    adaptation_coeff: f32,
 }
 
 impl LinkedCompressor {
     pub fn new(sr: f32) -> Self {
+        // Adaptation coefficient: ~100ms smoothing
+        let adaptation_coeff = time_constant_coeff(100.0, sr);
+
         Self {
             env_sq_l: 0.0,
             env_sq_r: 0.0,
@@ -115,7 +210,20 @@ impl LinkedCompressor {
             sample_rate: sr,
             gain_reduction_envelope: 0.0,
             peak_gain_reduction_db: 0.0,
+            crest_factor_db: 25.0, // Default: middle of target range
+            rms_variance: 0.001,   // Default: below threshold
+            adaptation_coeff,
         }
+    }
+
+    /// Update adaptation parameters from AudioProfile
+    /// Call this once per buffer with the input profile metrics
+    pub fn update_from_profile(&mut self, crest_factor_db: f32, rms_variance: f32) {
+        // Smooth the adaptation parameters to prevent sudden changes
+        self.crest_factor_db = self.adaptation_coeff * self.crest_factor_db
+            + (1.0 - self.adaptation_coeff) * crest_factor_db;
+        self.rms_variance = self.adaptation_coeff * self.rms_variance
+            + (1.0 - self.adaptation_coeff) * rms_variance;
     }
 
     #[inline]
@@ -180,8 +288,20 @@ impl LinkedCompressor {
         // ---------------------------------------------------------------------
         // 2. RMS envelopes (per channel, stereo-linked via max)
         // ---------------------------------------------------------------------
-        let rms_atk = self.coeff(RMS_ATTACK_MS);
-        let rms_rel = self.coeff(RMS_RELEASE_MS);
+        // Data-driven adaptation: adjust attack/release based on profile
+        let attack_mult = if self.crest_factor_db < CREST_ADAPTATION_THRESHOLD_DB {
+            LOW_CREST_ATTACK_MULT // Slower attack for low crest
+        } else {
+            1.0
+        };
+        let release_mult = if self.rms_variance > RMS_VARIANCE_THRESHOLD {
+            HIGH_VARIANCE_RELEASE_MULT // More smoothing for high variance
+        } else {
+            1.0
+        };
+
+        let rms_atk = self.coeff(RMS_ATTACK_MS * attack_mult);
+        let rms_rel = self.coeff(RMS_RELEASE_MS * release_mult);
 
         let sq_l = gated_l * gated_l;
         let sq_r = gated_r * gated_r;
@@ -214,8 +334,7 @@ impl LinkedCompressor {
         let peak_max = self.peak_env_l.max(self.peak_env_r);
 
         // Hybrid detector (speech-appropriate)
-        let hybrid =
-            (HYBRID_RMS_WEIGHT * rms_max + HYBRID_PEAK_WEIGHT * peak_max).max(DB_EPS);
+        let hybrid = (HYBRID_RMS_WEIGHT * rms_max + HYBRID_PEAK_WEIGHT * peak_max).max(DB_EPS);
         let hybrid_db = lin_to_db(hybrid);
         let peak_db = lin_to_db(peak_max.max(DB_EPS));
 
@@ -225,12 +344,19 @@ impl LinkedCompressor {
         let target_db = LEVELER_TARGET_DB;
         let over1 = hybrid_db - target_db;
 
-        let ratio1 = if over1 < LEVELER_RATIO_LOW_DB {
-            LEVELER_RATIO_LOW
-        } else if over1 < LEVELER_RATIO_MID_DB {
-            LEVELER_RATIO_MID
+        // Data-driven adaptation: reduce ratio for low crest factor
+        let ratio_mult = if self.crest_factor_db < CREST_ADAPTATION_THRESHOLD_DB {
+            LOW_CREST_RATIO_MULT // Gentler compression for low crest
         } else {
-            LEVELER_RATIO_HIGH
+            1.0
+        };
+
+        let ratio1 = if over1 < LEVELER_RATIO_LOW_DB {
+            1.0 + (LEVELER_RATIO_LOW - 1.0) * ratio_mult
+        } else if over1 < LEVELER_RATIO_MID_DB {
+            1.0 + (LEVELER_RATIO_MID - 1.0) * ratio_mult
+        } else {
+            1.0 + (LEVELER_RATIO_HIGH - 1.0) * ratio_mult
         };
 
         let red1_db = Self::soft_knee(over1, ratio1, LEVELER_KNEE_DB);

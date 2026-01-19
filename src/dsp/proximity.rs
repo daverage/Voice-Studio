@@ -1,3 +1,19 @@
+//! Proximity Effect (Low-end Restoration)
+//!
+//! # Perceptual Contract
+//! - **Target Source**: Thin, distant, or lapel-mic speech.
+//! - **Intended Effect**: Restore low-end body (100-300Hz) associated with close-mic broadcasting.
+//! - **Failure Modes**:
+//!   - Boomy / muddy sound if over-applied.
+//!   - Masking of intelligibility by excessive LF energy.
+//! - **Will Not Do**:
+//!   - Synthesize sub-harmonics (not a sub-synth).
+//!   - Fix physically high-passed inputs (e.g. telephone).
+//!
+//! # Lifecycle
+//! - **Active**: Normal operation.
+//! - **Bypassed**: Passes audio through.
+
 use crate::dsp::Biquad;
 
 // Constants for proximity effect tuning
@@ -36,6 +52,23 @@ const PROXIMITY_BYPASS_EPS: f32 = 0.001;
 // Increasing: more de-verb reduction at high proximity; decreasing: less contribution.
 const DEVERB_CONTRIB_SCALE: f32 = 0.4;
 
+/// Low-frequency shaping for "close mic" effect.
+///
+/// ## Metric Ownership (SHARED with Clarity)
+/// This module OWNS and is responsible for:
+/// - **Presence ratio**: Contributes to target (≤ 0.01) via LF boost
+/// - **Air ratio**: Contributes to target (≤ 0.005) via HF rolloff
+///
+/// This module must NOT attempt to modify:
+/// - RMS, crest factor, RMS variance (owned by Leveler)
+/// - Noise floor, SNR (owned by Denoiser)
+/// - Early/Late ratio, decay slope (owned by De-reverb)
+/// - HF variance (read-only guardrail metric)
+///
+/// ## Behavioral Rules
+/// - Only active when distant mic detected
+/// - Disabled entirely when whisper detected
+/// - Stops boost when presence target is reached
 pub struct Proximity {
     low_shelf: Biquad,
     hf_shelf: Biquad,
@@ -71,7 +104,7 @@ impl Proximity {
 
         // Smooth proximity to avoid zippering
         self.prox_smoothed += (target - self.prox_smoothed) * PROX_SMOOTH_COEFF;
-        
+
         // Ensure we snap to 0.0 if target is 0.0 and we are close enough
         if target <= PROXIMITY_BYPASS_EPS && self.prox_smoothed < PROXIMITY_BYPASS_EPS {
             self.prox_smoothed = 0.0;
@@ -90,14 +123,22 @@ impl Proximity {
 
         // Only update coefficients when they actually changed enough
         if (boost_db - self.last_boost_db).abs() > COEFF_UPDATE_THRESHOLD {
-            self.low_shelf
-                .update_low_shelf(LOW_SHELF_FREQ_HZ, FILTER_Q, boost_db, self.sample_rate);
+            self.low_shelf.update_low_shelf(
+                LOW_SHELF_FREQ_HZ,
+                FILTER_Q,
+                boost_db,
+                self.sample_rate,
+            );
             self.last_boost_db = boost_db;
         }
 
         if (hf_rolloff_db - self.last_hf_db).abs() > COEFF_UPDATE_THRESHOLD {
-            self.hf_shelf
-                .update_high_shelf(HF_SHELF_FREQ_HZ, FILTER_Q, hf_rolloff_db, self.sample_rate);
+            self.hf_shelf.update_high_shelf(
+                HF_SHELF_FREQ_HZ,
+                FILTER_Q,
+                hf_rolloff_db,
+                self.sample_rate,
+            );
             self.last_hf_db = hf_rolloff_db;
         }
 

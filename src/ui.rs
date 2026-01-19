@@ -1,8 +1,9 @@
+use crate::macro_controller::compute_targets_from_macros;
 use crate::meters::Meters;
-use crate::{AutoSuggestTargets, VoiceParams};
+use crate::VoiceParams;
 use nih_plug::params::Param;
-use nih_plug::prelude::BoolParam;
 use nih_plug::prelude::{GuiContext, ParamSetter};
+use nih_plug_vizia::vizia::binding::Map;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
@@ -22,24 +23,24 @@ const STYLE: &str = r#"
     }
 
     .header {
-        height: 72px;
+        height: 56px;
         background-color: #1e293b;
         border-bottom: 1px solid #334155;
-        child-space: 1s;
         col-between: 12px;
         padding-left: 20px;
         padding-right: 20px;
-        padding-top: 12px;
+        child-top: 1s;
+        child-bottom: 1s;
     }
 
     .header-title {
-        font-size: 20px;
+        font-size: 16px;
         font-weight: bold;
         color: #ffffff;
     }
 
     .header-sub {
-        font-size: 12px;
+        font-size: 11px;
         color: #94a3b8;
     }
 
@@ -67,6 +68,12 @@ const STYLE: &str = r#"
         color: #ffffff;
     }
 
+    .preview-button-active {
+        background-color: #1d4ed8;
+        border: 1px solid #3b82f6;
+        color: #ffffff;
+    }
+
     .preview-toggle {
         background-color: #0f172a;
         border: 1px solid #334155;
@@ -79,9 +86,39 @@ const STYLE: &str = r#"
         padding-bottom: 3px;
     }
 
-    .preview-toggle:checked {
-        background-color: #334155;
-        color: #e2e8f0;
+    .preview-toggle-active {
+        background-color: #f97316;
+        border: 1px solid #fb923c;
+        color: #ffffff;
+        font-weight: bold;
+    }
+
+    .mode-toggle {
+        child-space: 1s;
+        col-between: 6px;
+    }
+
+    .mode-button {
+        background-color: #0f172a;
+        border: 1px solid #334155;
+        border-radius: 6px;
+        color: #94a3b8;
+        font-size: 11px;
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 6px;
+        padding-bottom: 6px;
+    }
+
+    .mode-button-active {
+        background-color: #1d4ed8;
+        border: 1px solid #3b82f6;
+        color: #ffffff;
+        font-size: 11px;
+        padding-left: 10px;
+        padding-right: 10px;
+        padding-top: 6px;
+        padding-bottom: 6px;
     }
 
     .column-header {
@@ -120,6 +157,29 @@ const STYLE: &str = r#"
         font-size: 9px;
         color: #64748b;
     }
+
+    .footer {
+        height: 24px;
+        background-color: #0f172a;
+        padding-left: 8px;
+        padding-right: 8px;
+        padding-bottom: 4px;
+    }
+
+    .log-button {
+        background-color: transparent;
+        border: none;
+        color: #475569;
+        font-size: 9px;
+        padding-left: 4px;
+        padding-right: 4px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+    }
+
+    .log-button:hover {
+        color: #94a3b8;
+    }
 "#;
 
 #[derive(Lens, Clone)]
@@ -129,31 +189,7 @@ pub struct Data {
 
 impl Model for Data {}
 
-#[allow(dead_code)]
-// Single write path for Auto-Suggest parameter updates.
-fn apply_auto_suggest_targets(
-    params: &Arc<VoiceParams>,
-    gui_context: &Arc<dyn GuiContext>,
-    targets: AutoSuggestTargets,
-) {
-    let setter = ParamSetter::new(gui_context.as_ref());
-
-    setter.begin_set_parameter(&params.noise_reduction);
-    setter.set_parameter(&params.noise_reduction, targets.noise_reduction.value);
-    setter.end_set_parameter(&params.noise_reduction);
-
-    setter.begin_set_parameter(&params.reverb_reduction);
-    setter.set_parameter(&params.reverb_reduction, targets.reverb_reduction.value);
-    setter.end_set_parameter(&params.reverb_reduction);
-
-    setter.begin_set_parameter(&params.leveler);
-    setter.set_parameter(&params.leveler, targets.leveler.value);
-    setter.end_set_parameter(&params.leveler);
-
-    setter.begin_set_parameter(&params.de_esser);
-    setter.set_parameter(&params.de_esser, targets.de_esser.value);
-    setter.end_set_parameter(&params.de_esser);
-}
+type VoiceParamsBoolLens = Map<Wrapper<data_derived_lenses::params>, bool>;
 
 // --- COMPONENT: LEVEL METER ---
 
@@ -281,11 +317,7 @@ pub enum DeltaLevel {
 }
 
 impl DeltaActivityLight {
-    pub fn new(
-        cx: &mut Context,
-        meters: Arc<Meters>,
-        level: DeltaLevel,
-    ) -> Handle<'_, Self> {
+    pub fn new(cx: &mut Context, meters: Arc<Meters>, level: DeltaLevel) -> Handle<'_, Self> {
         Self { meters, level }.build(cx, |_| {})
     }
 }
@@ -351,29 +383,18 @@ pub enum ParamId {
     DeEsser,
     Leveler,
     OutputGain,
+    UseMl,
+    MacroDistance,
+    MacroClarity,
+    MacroConsistency,
 }
 
+/// Preview parameters - only subtractive effects have preview
 #[derive(Clone, Copy)]
 pub enum PreviewParamId {
-    NoiseReduction,
-    ReverbReduction,
-    Clarity,
-    Proximity,
+    Denoise,
+    Deverb,
     DeEsser,
-    Leveler,
-    OutputGain,
-}
-
-fn preview_param_for<'a>(params: &'a Arc<VoiceParams>, id: PreviewParamId) -> &'a BoolParam {
-    match id {
-        PreviewParamId::NoiseReduction => &params.preview_noise_reduction,
-        PreviewParamId::ReverbReduction => &params.preview_reverb_reduction,
-        PreviewParamId::Clarity => &params.preview_clarity,
-        PreviewParamId::Proximity => &params.preview_proximity,
-        PreviewParamId::DeEsser => &params.preview_de_esser,
-        PreviewParamId::Leveler => &params.preview_leveler,
-        PreviewParamId::OutputGain => &params.preview_output_gain,
-    }
 }
 
 impl SliderVisuals {
@@ -400,6 +421,10 @@ impl View for SliderVisuals {
             ParamId::DeEsser => self.params.de_esser.modulated_normalized_value(),
             ParamId::Leveler => self.params.leveler.modulated_normalized_value(),
             ParamId::OutputGain => self.params.output_gain.modulated_normalized_value(),
+            ParamId::UseMl => self.params.use_ml.modulated_normalized_value(),
+            ParamId::MacroDistance => self.params.macro_distance.modulated_normalized_value(),
+            ParamId::MacroClarity => self.params.macro_clarity.modulated_normalized_value(),
+            ParamId::MacroConsistency => self.params.macro_consistency.modulated_normalized_value(),
         };
 
         // 1. Draw Background Track
@@ -477,13 +502,22 @@ pub fn create_modern_slider<'a, P>(
     cx: &'a mut Context,
     label_text: &'static str,
     params_arc: Arc<VoiceParams>,
+    gui_context: Arc<dyn GuiContext>,
     param_id: ParamId,
-    preview_param_id: Option<PreviewParamId>,
     params_to_param: impl Fn(&Arc<VoiceParams>) -> &P + Copy + 'static,
 ) -> Handle<'a, VStack>
 where
     P: Param + 'static,
 {
+    // Setup for mouse down handler (macro write lock)
+    let params_for_mouse = params_arc.clone();
+    let gui_context_for_mouse = gui_context.clone();
+
+    let should_disable_macro = match param_id {
+        ParamId::MacroDistance | ParamId::MacroClarity | ParamId::MacroConsistency => false,
+        _ => true,
+    };
+
     VStack::new(cx, move |cx| {
         // 1. Text Row (Label ----- Value)
         HStack::new(cx, move |cx| {
@@ -516,31 +550,422 @@ where
                 .height(Stretch(1.0))
                 .opacity(0.0); // Invisible but captures mouse events
         })
-        .height(Pixels(24.0));
-
-        if let Some(preview_id) = preview_param_id {
-            Binding::new(
-                cx,
-                Data::params.map(|params| params.preview_cuts.value()),
-                move |cx, show_preview| {
-                    if show_preview.get(cx) {
-                        HStack::new(cx, move |cx| {
-                            Element::new(cx).width(Stretch(1.0));
-                            ParamButton::new(cx, Data::params, move |params| {
-                                preview_param_for(params, preview_id)
-                            })
-                            .with_label("Preview")
-                            .class("preview-toggle");
-                        })
-                        .width(Stretch(1.0))
-                        .height(Pixels(18.0));
-                    }
-                },
-            );
-        }
+        .height(Pixels(24.0))
+        .on_mouse_down(move |_, _| {
+            if should_disable_macro {
+                set_macro_mode(&params_for_mouse, &gui_context_for_mouse, false);
+            }
+        });
     })
     .height(Auto)
-    .bottom(Pixels(16.0)) // Margin bottom
+    .bottom(Pixels(8.0)) // Reduced margin
+}
+
+fn set_macro_mode(params: &Arc<VoiceParams>, gui_context: &Arc<dyn GuiContext>, enabled: bool) {
+    let setter = ParamSetter::new(gui_context.as_ref());
+
+    // When switching FROM Simple mode TO Advanced mode, sync the advanced params
+    // to reflect the current macro values. This ensures that the state is consistent.
+    if !enabled && params.macro_mode.value() {
+        let distance = params.macro_distance.value();
+        let clarity = params.macro_clarity.value();
+        let consistency = params.macro_consistency.value();
+
+        let targets = compute_targets_from_macros(distance, clarity, consistency);
+
+        // Set advanced params to match macro targets
+        setter.begin_set_parameter(&params.noise_reduction);
+        setter.set_parameter(&params.noise_reduction, targets.noise_reduction);
+        setter.end_set_parameter(&params.noise_reduction);
+
+        setter.begin_set_parameter(&params.noise_tone);
+        setter.set_parameter(&params.noise_tone, targets.noise_tone);
+        setter.end_set_parameter(&params.noise_tone);
+
+        setter.begin_set_parameter(&params.reverb_reduction);
+        setter.set_parameter(&params.reverb_reduction, targets.reverb_reduction);
+        setter.end_set_parameter(&params.reverb_reduction);
+
+        setter.begin_set_parameter(&params.proximity);
+        setter.set_parameter(&params.proximity, targets.proximity);
+        setter.end_set_parameter(&params.proximity);
+
+        setter.begin_set_parameter(&params.de_esser);
+        setter.set_parameter(&params.de_esser, targets.de_esser);
+        setter.end_set_parameter(&params.de_esser);
+
+        setter.begin_set_parameter(&params.leveler);
+        setter.set_parameter(&params.leveler, targets.leveler);
+        setter.end_set_parameter(&params.leveler);
+
+        // ML Advisor state is preserved (it's a user preference)
+        setter.begin_set_parameter(&params.use_ml);
+        setter.set_parameter(&params.use_ml, params.use_ml.value());
+        setter.end_set_parameter(&params.use_ml);
+    }
+
+    setter.begin_set_parameter(&params.macro_mode);
+    setter.set_parameter(&params.macro_mode, enabled);
+    setter.end_set_parameter(&params.macro_mode);
+
+    if enabled {
+        set_preview_mode(params, gui_context, None);
+    }
+}
+
+fn set_preview_mode(
+    params: &Arc<VoiceParams>,
+    gui_context: &Arc<dyn GuiContext>,
+    active: Option<PreviewParamId>,
+) {
+    let setter = ParamSetter::new(gui_context.as_ref());
+    let (denoise, deverb, deesser) = match active {
+        Some(PreviewParamId::Denoise) => (true, false, false),
+        Some(PreviewParamId::Deverb) => (false, true, false),
+        Some(PreviewParamId::DeEsser) => (false, false, true),
+        None => (false, false, false),
+    };
+
+    setter.begin_set_parameter(&params.preview_denoise);
+    setter.set_parameter(&params.preview_denoise, denoise);
+    setter.end_set_parameter(&params.preview_denoise);
+
+    setter.begin_set_parameter(&params.preview_deverb);
+    setter.set_parameter(&params.preview_deverb, deverb);
+    setter.end_set_parameter(&params.preview_deverb);
+
+    setter.begin_set_parameter(&params.preview_deesser);
+    setter.set_parameter(&params.preview_deesser, deesser);
+    setter.end_set_parameter(&params.preview_deesser);
+}
+
+fn build_header_previews(
+    cx: &mut Context,
+    params: Arc<VoiceParams>,
+    gui_context: Arc<dyn GuiContext>,
+) {
+    HStack::new(cx, move |cx| {
+        Label::new(cx, "PREVIEW CUTS:")
+            .class("header-sub")
+            .top(Pixels(2.0));
+
+        create_header_preview_button(
+            cx,
+            "Noise",
+            params.clone(),
+            gui_context.clone(),
+            PreviewParamId::Denoise,
+        );
+        create_header_preview_button(
+            cx,
+            "Reverb",
+            params.clone(),
+            gui_context.clone(),
+            PreviewParamId::Deverb,
+        );
+        create_header_preview_button(
+            cx,
+            "Sibilance",
+            params.clone(),
+            gui_context.clone(),
+            PreviewParamId::DeEsser,
+        );
+    })
+    .col_between(Pixels(8.0))
+    .child_top(Stretch(1.0))
+    .child_bottom(Stretch(1.0));
+}
+
+fn create_header_preview_button(
+    cx: &mut Context,
+    text: &'static str,
+    params: Arc<VoiceParams>,
+    gui_context: Arc<dyn GuiContext>,
+    id: PreviewParamId,
+) {
+    let params_for_binding = params.clone();
+    let gui_context_for_binding = gui_context.clone();
+
+    Binding::new(
+        cx,
+        Data::params.map(move |p| match id {
+            PreviewParamId::Denoise => p.preview_denoise.value(),
+            PreviewParamId::Deverb => p.preview_deverb.value(),
+            PreviewParamId::DeEsser => p.preview_deesser.value(),
+        }),
+        move |cx, is_active_lens: VoiceParamsBoolLens| {
+            let is_active = is_active_lens.get(cx);
+            let params_btn = params_for_binding.clone();
+            let gui_ctx = gui_context_for_binding.clone();
+
+            Button::new(
+                cx,
+                move |_| {
+                    let next = if is_active { None } else { Some(id) };
+                    set_preview_mode(&params_btn, &gui_ctx, next);
+                },
+                |cx| Label::new(cx, text),
+            )
+            .class(if is_active {
+                "preview-button-active"
+            } else {
+                "preview-button"
+            });
+        },
+    );
+}
+
+fn build_levels_column(cx: &mut Context, meters: Arc<Meters>) {
+    let meters_in = meters.clone();
+    let meters_gr = meters.clone();
+    let meters_out = meters.clone();
+
+    VStack::new(cx, move |cx| {
+        Label::new(cx, "LEVELS")
+            .class("column-header")
+            .class("col-levels");
+
+        HStack::new(cx, move |cx| {
+            // IN
+            VStack::new(cx, move |cx| {
+                Label::new(cx, "IN").class("meter-label");
+                HStack::new(cx, move |cx| {
+                    LevelMeter::new(cx, meters_in.clone(), MeterType::InputL).width(Pixels(10.0));
+                    LevelMeter::new(cx, meters_in.clone(), MeterType::InputR).width(Pixels(10.0));
+                })
+                .col_between(Pixels(2.0))
+                .height(Stretch(1.0));
+            })
+            .width(Pixels(30.0))
+            .height(Stretch(1.0));
+
+            // GR
+            VStack::new(cx, move |cx| {
+                Label::new(cx, "GR").class("meter-label");
+                LevelMeter::new(cx, meters_gr.clone(), MeterType::GainReduction)
+                    .width(Pixels(14.0))
+                    .height(Stretch(1.0));
+            })
+            .width(Pixels(30.0))
+            .height(Stretch(1.0));
+
+            // OUT
+            VStack::new(cx, move |cx| {
+                Label::new(cx, "OUT").class("meter-label");
+                HStack::new(cx, move |cx| {
+                    LevelMeter::new(cx, meters_out.clone(), MeterType::OutputL).width(Pixels(10.0));
+                    LevelMeter::new(cx, meters_out.clone(), MeterType::OutputR).width(Pixels(10.0));
+                })
+                .col_between(Pixels(2.0))
+                .height(Stretch(1.0));
+            })
+            .width(Pixels(30.0))
+            .height(Stretch(1.0));
+        })
+        .col_between(Pixels(10.0))
+        .height(Pixels(180.0)); // Fixed height for meters
+
+        // Spacing between meters and delta activity
+        Element::new(cx).height(Pixels(10.0));
+
+        Label::new(cx, "DELTA ACTIVITY").class("meter-label");
+        HStack::new(cx, move |cx| {
+            let meters_delta = meters.clone();
+            VStack::new(cx, move |cx| {
+                DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Idle)
+                    .width(Pixels(12.0))
+                    .height(Pixels(8.0));
+                Label::new(cx, "Idle").class("delta-label");
+            });
+            let meters_delta = meters.clone();
+            VStack::new(cx, move |cx| {
+                DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Light)
+                    .width(Pixels(12.0))
+                    .height(Pixels(8.0));
+                Label::new(cx, "Light").class("delta-label");
+            });
+            let meters_delta = meters.clone();
+            VStack::new(cx, move |cx| {
+                DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Heavy)
+                    .width(Pixels(12.0))
+                    .height(Pixels(8.0));
+                Label::new(cx, "Heavy").class("delta-label");
+            });
+        })
+        .col_between(Pixels(10.0));
+    })
+    .width(Pixels(130.0)); // Fixed width for levels column
+}
+
+fn build_clean_column(
+    cx: &mut Context,
+    params: Arc<VoiceParams>,
+    gui_context: Arc<dyn GuiContext>,
+) {
+    VStack::new(cx, move |cx| {
+        Label::new(cx, "CLEAN & REPAIR")
+            .class("column-header")
+            .class("col-clean");
+
+        create_modern_slider(
+            cx,
+            "Noise Reduction",
+            params.clone(),
+            gui_context.clone(),
+            ParamId::NoiseReduction,
+            |p| &p.noise_reduction,
+        );
+        create_modern_slider(
+            cx,
+            "Tone",
+            params.clone(),
+            gui_context.clone(),
+            ParamId::NoiseTone,
+            |p| &p.noise_tone,
+        );
+        create_modern_slider(
+            cx,
+            "De-Verb",
+            params.clone(),
+            gui_context.clone(),
+            ParamId::ReverbReduction,
+            |p| &p.reverb_reduction,
+        );
+        create_modern_slider(
+            cx,
+            "Clarity",
+            params.clone(),
+            gui_context.clone(),
+            ParamId::Clarity,
+            |p| &p.clarity,
+        );
+
+        // ML Toggle
+        let params_for_ml = params.clone();
+        let gui_ctx_for_ml = gui_context.clone();
+        Binding::new(
+            cx,
+            Data::params.map(|p| p.use_ml.value()),
+            move |cx, use_ml_lens: VoiceParamsBoolLens| {
+                let use_ml = use_ml_lens.get(cx);
+                let params_btn = params_for_ml.clone();
+                let gui_ctx_btn = gui_ctx_for_ml.clone();
+                HStack::new(cx, move |cx| {
+                    Label::new(cx, "ML Advisor")
+                        .class("slider-label")
+                        .text_wrap(false);
+                    Element::new(cx).width(Stretch(1.0));
+                    Button::new(
+                        cx,
+                        move |_| {
+                            let setter = ParamSetter::new(gui_ctx_btn.as_ref());
+                            setter.begin_set_parameter(&params_btn.use_ml);
+                            setter.set_parameter(&params_btn.use_ml, !use_ml);
+                            setter.end_set_parameter(&params_btn.use_ml);
+                        },
+                        |cx| Label::new(cx, if use_ml { "ON" } else { "OFF" }),
+                    )
+                    .class(if use_ml {
+                        "preview-toggle-active"
+                    } else {
+                        "preview-toggle"
+                    })
+                    .width(Pixels(40.0));
+                })
+                .height(Pixels(20.0))
+                .width(Stretch(1.0))
+                .top(Pixels(4.0));
+            },
+        );
+    })
+    .width(Stretch(1.0));
+}
+
+fn build_polish_column(
+    cx: &mut Context,
+    params: Arc<VoiceParams>,
+    gui_context: Arc<dyn GuiContext>,
+) {
+    VStack::new(cx, move |cx| {
+        Label::new(cx, "POLISH & ENHANCE")
+            .class("column-header")
+            .class("col-polish");
+
+        create_modern_slider(
+            cx,
+            "Proximity",
+            params.clone(),
+            gui_context.clone(),
+            ParamId::Proximity,
+            |p| &p.proximity,
+        );
+        create_modern_slider(
+            cx,
+            "De-Ess",
+            params.clone(),
+            gui_context.clone(),
+            ParamId::DeEsser,
+            |p| &p.de_esser,
+        );
+        create_modern_slider(
+            cx,
+            "Leveler",
+            params.clone(),
+            gui_context.clone(),
+            ParamId::Leveler,
+            |p| &p.leveler,
+        );
+
+        // Spacing
+        Element::new(cx).height(Pixels(20.0));
+
+        // Output Gain (Highlighted)
+        Label::new(cx, "OUTPUT")
+            .class("column-header")
+            .color(Color::rgb(249, 115, 22));
+        create_modern_slider(cx, "Gain", params, gui_context, ParamId::OutputGain, |p| {
+            &p.output_gain
+        });
+    })
+    .width(Stretch(1.0));
+}
+
+fn build_macro_column(
+    cx: &mut Context,
+    params: Arc<VoiceParams>,
+    gui_context: Arc<dyn GuiContext>,
+) {
+    VStack::new(cx, move |cx| {
+        Label::new(cx, "EASY CONTROLS")
+            .class("column-header")
+            .class("col-clean");
+
+        create_modern_slider(
+            cx,
+            "Distance",
+            params.clone(),
+            gui_context.clone(),
+            ParamId::MacroDistance,
+            |p| &p.macro_distance,
+        );
+        create_modern_slider(
+            cx,
+            "Clarity",
+            params.clone(),
+            gui_context.clone(),
+            ParamId::MacroClarity,
+            |p| &p.macro_clarity,
+        );
+        create_modern_slider(
+            cx,
+            "Consistency",
+            params.clone(),
+            gui_context.clone(),
+            ParamId::MacroConsistency,
+            |p| &p.macro_consistency,
+        );
+    })
+    .width(Stretch(1.0));
 }
 
 // --- MAIN VIEW BUILDER ---
@@ -549,9 +974,8 @@ pub fn build_ui(
     cx: &mut Context,
     params: Arc<VoiceParams>,
     meters: Arc<Meters>,
-    _suggested_settings: Arc<Mutex<Option<AutoSuggestTargets>>>,
     _ui_proxy: Arc<Mutex<Option<ContextProxy>>>,
-    _gui_context: Arc<dyn GuiContext>,
+    gui_context: Arc<dyn GuiContext>,
 ) {
     // Inject CSS
     let _ = cx.add_stylesheet(STYLE);
@@ -566,206 +990,140 @@ pub fn build_ui(
     VStack::new(cx, move |cx| {
         // --- HEADER ---
         HStack::new(cx, |cx| {
-            VStack::new(cx, |cx| {
-                Label::new(cx, "VOICE STUDIO").class("header-title");
-                Label::new(cx, "Vocal Restoration & Enhancement").class("header-sub");
-            })
-            .width(Stretch(1.0));
-
+            // Title on left
             HStack::new(cx, |cx| {
-                ParamButton::new(cx, Data::params, |params| &params.preview_cuts)
-                    .with_label("Preview Cuts")
-                    .class("preview-button");
+                Label::new(cx, "VOICE STUDIO").class("header-title");
+                Label::new(cx, "Vocal Restoration & Enhancement")
+                    .class("header-sub")
+                    .left(Pixels(12.0));
             })
-            .class("header-controls");
+            .col_between(Pixels(0.0))
+            .child_top(Stretch(1.0))
+            .child_bottom(Stretch(1.0));
+
+            // Spacer
+            Element::new(cx).width(Stretch(1.0));
+
+            // Header Preview Buttons
+            build_header_previews(cx, params.clone(), gui_context.clone());
+
+            // Mode toggle on right
+            let params_for_mode = params.clone();
+            let gui_context_for_mode = gui_context.clone();
+            Binding::new(
+                cx,
+                Data::params.map(|p| p.macro_mode.value()),
+                move |cx, macro_mode_lens: VoiceParamsBoolLens| {
+                    let params_btn = params_for_mode.clone();
+                    let gui_ctx = gui_context_for_mode.clone();
+                    let macro_mode = macro_mode_lens.get(cx);
+                    HStack::new(cx, move |cx| {
+                        Button::new(
+                            cx,
+                            {
+                                let params_btn = params_btn.clone();
+                                let gui_ctx = gui_ctx.clone();
+                                move |_| set_macro_mode(&params_btn, &gui_ctx, true)
+                            },
+                            |cx| Label::new(cx, "Simple"),
+                        )
+                        .class(if macro_mode {
+                            "mode-button-active"
+                        } else {
+                            "mode-button"
+                        });
+                        Button::new(
+                            cx,
+                            {
+                                let params_btn = params_btn.clone();
+                                let gui_ctx = gui_ctx.clone();
+                                move |_| set_macro_mode(&params_btn, &gui_ctx, false)
+                            },
+                            |cx| Label::new(cx, "Advanced"),
+                        )
+                        .class(if macro_mode {
+                            "mode-button"
+                        } else {
+                            "mode-button-active"
+                        });
+                    })
+                    .col_between(Pixels(4.0));
+                },
+            );
         })
         .class("header");
 
         // --- MAIN CONTENT GRID ---
         let meters_for_main = meters.clone();
-
-        HStack::new(cx, move |cx| {
-            let meters_in = meters_for_main.clone();
-            let meters_gr = meters_for_main.clone();
-            let meters_out = meters_for_main.clone();
-            let params_clean = params.clone();
-            let params_polish = params.clone();
-            // COLUMN 1: LEVELS
-            VStack::new(cx, move |cx| {
-                Label::new(cx, "LEVELS")
-                    .class("column-header")
-                    .class("col-levels");
-
+        let params_for_main = params.clone();
+        let gui_context_for_main = gui_context.clone();
+        Binding::new(
+            cx,
+            Data::params.map(|p| p.macro_mode.value()),
+            move |cx, macro_mode_lens: VoiceParamsBoolLens| {
+                // Clone inside Binding closure (Fn requires this)
+                let meters_inner = meters_for_main.clone();
+                let params_inner = params_for_main.clone();
+                let gui_ctx_inner = gui_context_for_main.clone();
+                let macro_mode = macro_mode_lens.get(cx);
                 HStack::new(cx, move |cx| {
-                    // IN
-                    VStack::new(cx, move |cx| {
-                        Label::new(cx, "IN").class("meter-label");
-                        HStack::new(cx, move |cx| {
-                            LevelMeter::new(cx, meters_in.clone(), MeterType::InputL)
-                                .width(Pixels(10.0));
-                            LevelMeter::new(cx, meters_in.clone(), MeterType::InputR)
-                                .width(Pixels(10.0));
-                        })
-                        .col_between(Pixels(2.0))
-                        .height(Stretch(1.0));
-                    })
-                    .width(Pixels(30.0))
-                    .height(Stretch(1.0));
-
-                    // GR
-                    VStack::new(cx, move |cx| {
-                        Label::new(cx, "GR").class("meter-label");
-                        LevelMeter::new(cx, meters_gr.clone(), MeterType::GainReduction)
-                            .width(Pixels(14.0))
-                            .height(Stretch(1.0));
-                    })
-                    .width(Pixels(30.0))
-                    .height(Stretch(1.0));
-
-                    // OUT
-                    VStack::new(cx, move |cx| {
-                        Label::new(cx, "OUT").class("meter-label");
-                        HStack::new(cx, move |cx| {
-                            LevelMeter::new(cx, meters_out.clone(), MeterType::OutputL)
-                                .width(Pixels(10.0));
-                            LevelMeter::new(cx, meters_out.clone(), MeterType::OutputR)
-                                .width(Pixels(10.0));
-                        })
-                        .col_between(Pixels(2.0))
-                        .height(Stretch(1.0));
-                    })
-                    .width(Pixels(30.0))
-                    .height(Stretch(1.0));
+                    build_levels_column(cx, meters_inner.clone());
+                    if macro_mode {
+                        build_macro_column(cx, params_inner.clone(), gui_ctx_inner.clone());
+                        // Spacer to fill remaining space in Simple mode
+                        Element::new(cx).width(Stretch(1.0));
+                    } else {
+                        build_clean_column(cx, params_inner.clone(), gui_ctx_inner.clone());
+                        build_polish_column(cx, params_inner.clone(), gui_ctx_inner.clone());
+                    }
                 })
-                .col_between(Pixels(10.0))
-                .height(Pixels(200.0)); // Fixed height for meters
+                .col_between(Pixels(24.0))
+                .class("main-view")
+                .child_left(Pixels(20.0))
+                .child_right(Pixels(20.0))
+                .child_top(Pixels(20.0))
+                .child_bottom(Pixels(12.0))
+                .width(Stretch(1.0))
+                .height(Stretch(1.0));
+            },
+        );
 
-                Label::new(cx, "DELTA ACTIVITY").class("meter-label");
-                HStack::new(cx, move |cx| {
-                    let meters_delta = meters.clone();
-                    VStack::new(cx, move |cx| {
-                        DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Idle)
-                            .width(Pixels(12.0))
-                            .height(Pixels(8.0));
-                        Label::new(cx, "Idle").class("delta-label");
-                    });
-                    let meters_delta = meters.clone();
-                    VStack::new(cx, move |cx| {
-                        DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Light)
-                            .width(Pixels(12.0))
-                            .height(Pixels(8.0));
-                        Label::new(cx, "Light").class("delta-label");
-                    });
-                    let meters_delta = meters.clone();
-                    VStack::new(cx, move |cx| {
-                        DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Heavy)
-                            .width(Pixels(12.0))
-                            .height(Pixels(8.0));
-                        Label::new(cx, "Heavy").class("delta-label");
-                    });
-                })
-                .col_between(Pixels(10.0));
-            })
-            .width(Stretch(1.0));
-
-            // COLUMN 2: CLEAN & REPAIR
-            VStack::new(cx, move |cx| {
-                Label::new(cx, "CLEAN & REPAIR")
-                    .class("column-header")
-                    .class("col-clean");
-
-                create_modern_slider(
-                    cx,
-                    "Noise Reduction",
-                    params_clean.clone(),
-                    ParamId::NoiseReduction,
-                    Some(PreviewParamId::NoiseReduction),
-                    |p| &p.noise_reduction,
-                );
-                create_modern_slider(
-                    cx,
-                    "Tone",
-                    params_clean.clone(),
-                    ParamId::NoiseTone,
-                    None,
-                    |p| &p.noise_tone,
-                );
-                create_modern_slider(
-                    cx,
-                    "De-Verb",
-                    params_clean.clone(),
-                    ParamId::ReverbReduction,
-                    Some(PreviewParamId::ReverbReduction),
-                    |p| &p.reverb_reduction,
-                );
-                create_modern_slider(
-                    cx,
-                    "Clarity",
-                    params_clean,
-                    ParamId::Clarity,
-                    Some(PreviewParamId::Clarity),
-                    |p| &p.clarity,
-                );
-            })
-            .width(Stretch(1.0));
-
-            // COLUMN 3: POLISH & ENHANCE
-            VStack::new(cx, move |cx| {
-                Label::new(cx, "POLISH & ENHANCE")
-                    .class("column-header")
-                    .class("col-polish");
-
-                create_modern_slider(
-                    cx,
-                    "Proximity",
-                    params_polish.clone(),
-                    ParamId::Proximity,
-                    Some(PreviewParamId::Proximity),
-                    |p| &p.proximity,
-                );
-                create_modern_slider(
-                    cx,
-                    "De-Ess",
-                    params_polish.clone(),
-                    ParamId::DeEsser,
-                    Some(PreviewParamId::DeEsser),
-                    |p| &p.de_esser,
-                );
-                create_modern_slider(
-                    cx,
-                    "Leveler",
-                    params_polish.clone(),
-                    ParamId::Leveler,
-                    Some(PreviewParamId::Leveler),
-                    |p| &p.leveler,
-                );
-
-                // Spacing
-                Element::new(cx).height(Pixels(20.0));
-
-                // Output Gain (Highlighted)
-                Label::new(cx, "OUTPUT")
-                    .class("column-header")
-                    .color(Color::rgb(249, 115, 22));
-                create_modern_slider(
-                    cx,
-                    "Gain",
-                    params_polish,
-                    ParamId::OutputGain,
-                    Some(PreviewParamId::OutputGain),
-                    |p| &p.output_gain,
-                );
-            })
-            .width(Stretch(1.0));
+        // --- FOOTER ---
+        HStack::new(cx, |cx| {
+            Button::new(
+                cx,
+                |_| {
+                    // Open the log file
+                    #[cfg(target_os = "macos")]
+                    {
+                        // Touch the file first to create it if it doesn't exist
+                        let _ = std::process::Command::new("touch")
+                            .arg("/tmp/voice_studio.log")
+                            .status();
+                        let _ = std::process::Command::new("open")
+                            .arg("-a")
+                            .arg("Console")
+                            .arg("/tmp/voice_studio.log")
+                            .spawn();
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let _ = std::process::Command::new("xdg-open")
+                            .arg("/tmp/voice_studio.log")
+                            .spawn();
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        let _ = std::process::Command::new("notepad")
+                            .arg("C:\\temp\\voice_studio.log")
+                            .spawn();
+                    }
+                },
+                |cx| Label::new(cx, "Log"),
+            )
+            .class("log-button");
         })
-        .col_between(Pixels(20.0))
-        .class("main-view")
-        .child_left(Pixels(30.0))
-        .child_right(Pixels(30.0))
-        .child_top(Pixels(30.0))
-        .child_bottom(Pixels(30.0))
-        .width(Stretch(1.0))
-        .height(Stretch(1.0));
+        .class("footer");
     })
     .class("app-root")
     .width(Stretch(1.0))

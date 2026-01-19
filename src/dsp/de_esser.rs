@@ -1,3 +1,19 @@
+//! De-Esser (Sibilance Reducer)
+//!
+//! # Perceptual Contract
+//! - **Target Source**: Sibilant speech (excessive 's', 'sh', 'ch', 't').
+//! - **Intended Effect**: Attenuate sibilance band momentarily when detected, without dulling the whole track.
+//! - **Failure Modes**:
+//!   - Lisping / "th-ing" if threshold is too low or reduction too deep.
+//!   - Dullness if attack is too fast or band is too wide.
+//! - **Will Not Do**:
+//!   - Remove broadband high frequencies (static EQ).
+//!   - Fix clipped sibilance.
+//!
+//! # Lifecycle
+//! - **Active**: Normal operation.
+//! - **Bypassed**: Passes audio through.
+
 use crate::dsp::utils::{db_to_gain, lin_to_db, smoothstep, DB_EPS};
 use crate::dsp::Biquad;
 
@@ -83,6 +99,21 @@ const INPUT_FLOOR: f32 = 1e-25;
 const BAND_BYPASS_GAIN_EPS: f32 = 0.999;
 
 /// Shared detector for stereo-linked de-essing.
+///
+/// ## Metric Ownership (NONE - Corrective Only)
+/// This module does not own any target metrics.
+/// It operates as a corrective filter to keep sibilance inside target band.
+///
+/// This module must NOT attempt to modify:
+/// - RMS, crest factor, RMS variance (owned by Leveler)
+/// - Noise floor, SNR (owned by Denoiser)
+/// - Early/Late ratio, decay slope (owned by De-reverb)
+/// - Presence/Air ratios (owned by Proximity + Clarity)
+/// - HF variance (read-only guardrail metric)
+///
+/// ## Behavioral Rules
+/// - Disabled entirely when whisper detected
+/// - Slow, shallow reduction for borderline cases
 pub struct DeEsserDetector {
     sib_hpf: Biquad,
     sib_lpf: Biquad,
@@ -238,6 +269,12 @@ impl DeEsserDetector {
 
         self.gain_smooth
     }
+
+    /// Get current gain reduction in dB (for metering)
+    #[allow(dead_code)]
+    pub fn get_gain_reduction_db(&self) -> f32 {
+        lin_to_db(self.gain_smooth).abs()
+    }
 }
 
 /// Per-channel application band
@@ -264,20 +301,9 @@ impl DeEsserBand {
         } else {
             lin_to_db(gain)
         };
-        
+
         self.filter
             .update_peaking(DE_ESS_BAND_HZ, DE_ESS_BAND_Q, cut_db, self.sample_rate);
         self.filter.process(input)
-    }
-
-}
-
-impl DeEsserDetector {
-    pub fn sibilance_metric(&self) -> f32 {
-        self.last_sibilance_weight
-    }
-
-    pub fn sibilance_over_db(&self) -> f32 {
-        self.last_over_db
     }
 }

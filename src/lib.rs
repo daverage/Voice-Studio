@@ -252,6 +252,9 @@ pub struct VoiceParams {
     #[id = "use_ml"]
     pub use_ml: BoolParam,
 
+    #[id = "use_dtln"]
+    pub use_dtln: BoolParam,
+
     // -------------------------------------------------------------------------
     // MACRO CONTROLS (Easy Mode)
     // -------------------------------------------------------------------------
@@ -414,6 +417,8 @@ impl Default for VoiceStudioPlugin {
                 preview_deesser: BoolParam::new("Preview De-Esser", false),
 
                 use_ml: BoolParam::new("Use ML Advisor", true),
+
+                use_dtln: BoolParam::new("Use DTLN", false),
 
                 // Macro controls
                 macro_mode: BoolParam::new("Easy Mode", true), // Start in Simple mode
@@ -578,7 +583,6 @@ impl Plugin for VoiceStudioPlugin {
         // =====================================================================
         let macro_mode = self.params.macro_mode.value();
 
-        // Update macro controller state
         if macro_mode {
             use macro_controller::MacroState;
             self.macro_controller.set_state(MacroState {
@@ -591,49 +595,61 @@ impl Plugin for VoiceStudioPlugin {
             self.macro_controller.set_active(false);
         }
 
-        // Get detected conditions for control stability
+        // INVARIANT:
+        // Macro mode MUST NOT alter DSP topology. It may only change parameter values.
+        #[cfg(debug_assertions)]
+        log::debug!("DSP topology invariant holds (macro_mode={})", macro_mode);
+
+        // Conditions are updated at end-of-buffer via update_input_profile().
+        // We read the last-known values here for stability guards.
         let conditions = self.macro_controller.get_conditions();
         let whisper = conditions.whisper;
         let noisy = conditions.noisy_environment;
 
-        // Clarity is always from direct parameter (not macro-controlled in the same way)
-        let raw_clarity = (self.params.clarity.value() * MAX_GAIN).clamp(0.0, 1.0);
-
-        // Get parameter values - either from macros or direct controls
-        let (raw_noise, noise_tone, raw_reverb, raw_prox, raw_de_ess, level_amt) = if macro_mode {
-            // Update smoothed macro targets
-            let frame_count_est = buffer.samples() as usize;
-            let targets = self.macro_controller.update_smooth(frame_count_est);
-
-            // Apply smoothed targets to actual parameters
-            self.macro_controller
-                .apply_smoothed_targets_to_params(&self.params);
-
-            // Apply macro targets to parameters
-            (
-                (targets.noise_reduction * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                targets.noise_tone,
-                targets.reverb_reduction.clamp(0.0, 1.0),
-                (targets.proximity * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                (targets.de_esser * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                (targets.leveler * MAX_GAIN).clamp(0.0, MAX_GAIN),
-            )
+        // Compute macro targets once per buffer and reuse them.
+        let frame_count_est = buffer.samples() as usize;
+        let macro_targets = if macro_mode {
+            Some(self.macro_controller.update_smooth(frame_count_est))
         } else {
-            // Use direct parameter values
-            (
-                (self.params.noise_reduction.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                self.params.noise_tone.value(),
-                (self.params.reverb_reduction.value() * MAX_GAIN).clamp(0.0, 1.0),
-                (self.params.proximity.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                (self.params.de_esser.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                (self.params.leveler.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
-            )
+            None
         };
 
-        // Apply spectral control slew limiting (prevent warble/artifacts)
+        // Advanced user parameters (still the source of truth)
+        let user_clarity = (self.params.clarity.value() * MAX_GAIN).clamp(0.0, 1.0);
+
+        // Macro clarity is light touch: it can only CAP user clarity, never boost it.
+        let clarity_amt_pre_limit = if let Some(t) = macro_targets {
+            user_clarity.min(t.clarity_cap)
+        } else {
+            user_clarity
+        };
+
+        // Resolve either macro-driven values or direct parameter values
+        let (raw_noise, noise_tone, raw_reverb, raw_prox, raw_de_ess, level_amt) =
+            if let Some(t) = macro_targets {
+                (
+                    (t.noise_reduction * MAX_GAIN).clamp(0.0, MAX_GAIN),
+                    t.noise_tone,
+                    t.reverb_reduction.clamp(0.0, 1.0),
+                    (t.proximity * MAX_GAIN).clamp(0.0, MAX_GAIN),
+                    (t.de_esser * MAX_GAIN).clamp(0.0, MAX_GAIN),
+                    (t.leveler * MAX_GAIN).clamp(0.0, MAX_GAIN),
+                )
+            } else {
+                (
+                    (self.params.noise_reduction.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
+                    self.params.noise_tone.value(),
+                    (self.params.reverb_reduction.value() * MAX_GAIN).clamp(0.0, 1.0),
+                    (self.params.proximity.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
+                    (self.params.de_esser.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
+                    (self.params.leveler.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
+                )
+            };
+
+        // Apply spectral control slew limiting (prevents warble/artifacts)
         let limited = self.control_limiters.process(
             raw_noise,
-            raw_clarity,
+            clarity_amt_pre_limit,
             raw_de_ess,
             raw_reverb,
             raw_prox,
@@ -687,6 +703,7 @@ impl Plugin for VoiceStudioPlugin {
             tone: noise_tone,
             sample_rate: self.sample_rate,
             use_ml: self.params.use_ml.value(),
+            use_dtln: self.params.use_dtln.value(),
         };
 
         // Peak decay rate: 13 dB/sec (typical for DAW meters)
@@ -704,6 +721,8 @@ impl Plugin for VoiceStudioPlugin {
         let frame_count = left.len().min(right.len());
 
         let mut restoration_delta_energy = 0.0f32;
+        let mut max_deverb_cut_db = -100.0f32; // Initialize to very low value
+        let mut max_deesser_cut_db = -100.0f32; // Initialize to very low value
 
         for idx in 0..frame_count {
             let input_l = left[idx];
@@ -722,15 +741,15 @@ impl Plugin for VoiceStudioPlugin {
             // 0b. SPEECH CONFIDENCE (sidechain analysis - no audio modification)
             let sidechain = self.speech_confidence.process(input_l, input_r);
 
+            // Periodically maintain stability to prevent long-term drift
+            // Call every ~1000 samples to prevent numerical drift over long sessions
+            if idx % 1000 == 0 {
+                self.speech_confidence.maintain_stability();
+            }
+
             // 1. EARLY REFLECTION SUPPRESSION (before denoise)
             // This handles short-lag reflections that make recordings sound "distant"
-            let early_reflection_amt = if macro_mode {
-                // In macro mode, early reflection is driven by distance macro
-                self.params.macro_distance.value() * 0.8
-            } else {
-                // In advanced mode, use reverb reduction parameter
-                reverb_amt * 0.5
-            };
+            let early_reflection_amt = (reverb_amt * 0.5).clamp(0.0, 1.0);
 
             let (pre_l, pre_r) = if bypass_restoration || early_reflection_amt < 0.001 {
                 (input_l, input_r)
@@ -745,13 +764,7 @@ impl Plugin for VoiceStudioPlugin {
 
             // 2. SPEECH EXPANDER (after early reflection, before denoise)
             // Controls pauses and room swell without hard gating
-            let expander_amt = if macro_mode {
-                // In macro mode, expander is driven by distance macro
-                self.params.macro_distance.value() * 0.6
-            } else {
-                // In advanced mode, disabled (could add dedicated parameter)
-                0.0
-            };
+            let expander_amt = (reverb_amt * 0.6).clamp(0.0, 1.0);
 
             let (exp_l, exp_r) = if expander_amt < 0.001 {
                 (pre_l, pre_r)
@@ -881,6 +894,9 @@ impl Plugin for VoiceStudioPlugin {
                     + restoration_delta_r * restoration_delta_r);
 
             // B. SHAPING STAGE (proximity, clarity)
+            // Note: Proximity and clarity interact - proximity affects the frequency response
+            // that clarity operates on, so order matters. Proximity comes first as it's a
+            // more fundamental spatial characteristic.
             let (s4_l, s4_r) = if bypass_shaping {
                 (s3_l, s3_r)
             } else {
@@ -953,15 +969,38 @@ impl Plugin for VoiceStudioPlugin {
                 (out_l, out_r, cut_l, cut_r)
             };
 
+            // Control interaction safeguard: Apply leveler gain with consideration of de-esser activity
+            // to prevent both systems from fighting each other
             let (s7_l, s7_r) = if bypass_dynamics {
                 (s6_l, s6_r)
             } else {
-                let leveler_gain = self.linked_compressor.compute_gain(s6_l, s6_r, level_amt);
+                // Calculate de-esser reduction amount to adjust leveler behavior
+                let de_ess_reduction_db = if de_ess_amt > 0.001 {
+                    let input_power = (s5_l * s5_l + s5_r * s5_r) * 0.5;
+                    let output_power = (s6_l * s6_l + s6_r * s6_r) * 0.5;
+                    if output_power > 0.0 && input_power > 0.0 {
+                        10.0 * (output_power / input_power).log10()
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                };
+
+                // Adjust leveler behavior based on de-esser activity to prevent interaction
+                let adjusted_level_amt = if de_ess_reduction_db < -3.0 { // Strong de-esser activity
+                    level_amt * 0.7 // Reduce leveler aggression to prevent fight
+                } else {
+                    level_amt
+                };
+
+                let leveler_gain = self.linked_compressor.compute_gain(s6_l, s6_r, adjusted_level_amt);
                 (s6_l * leveler_gain, s6_r * leveler_gain)
             };
 
             // D. SPECTRAL GUARDRAILS (safety layer before limiter)
             // Prevents extreme settings from breaking sound
+            // Note: Applied after leveler to ensure gain reduction doesn't exceed limiter threshold
             let (s7g_l, s7g_r) = self.spectral_guardrails.process(s7_l, s7_r, macro_mode);
 
             let (s8_l, s8_r) = if bypass_dynamics {
@@ -1121,15 +1160,19 @@ impl Plugin for VoiceStudioPlugin {
                 use std::io::Write;
                 let _ = writeln!(
                     file,
-                    "[DSP] mode={} | noise={:.2} deverb={:.2} prox={:.2} deess={:.2} level={:.2} | \
-                     speech={:.2} | deess_gr={:.1}dB limit_gr={:.1}dB",
+                    "[DSP] mode={} ml={} | noise={:.2} deverb={:.2} prox={:.2} deess={:.2} level={:.2} | \
+                     speech={:.2} | denoise_delta={:.1}dB deverb_max_cut={:.1}dB deess_max_cut={:.1}dB deess_gr={:.1}dB limit_gr={:.1}dB",
                     if macro_mode { "SIMPLE" } else { "ADVANCED" },
+                    self.params.use_ml.value(),
                     noise_amt,
                     total_deverb,
                     prox_amt,
                     de_ess_amt,
                     level_amt,
                     last_sidechain.speech_conf,
+                    self.meters.get_restoration_delta_rms_db(),
+                    max_deverb_cut_db, // Max deverb cut in dB
+                    max_deesser_cut_db, // Max de-esser cut in dB
                     self.linked_de_esser.get_gain_reduction_db(),
                     self.linked_limiter.get_gain_reduction_db(),
                 );
