@@ -1,0 +1,39 @@
+[package]
+name = "voice_studio"
+version = "1.0.1"
+edition = "2021"
+authors = ["Andrzej Marczewski"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Plugin Framework
+nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
+nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git" }
+
+# Tract ML inference
+tract-core = { version = "=0.21.11", default-features = false, features = ["ndarray"], optional = true }
+tract-tflite = { version = "=0.21.11", default-features = false, optional = true }
+tract-metal = { version = "=0.21.11", optional = true }
+
+# optional: for logging
+log = "0.4"
+
+# Audio Processing
+rustfft = "6.1"
+# locking to 0.2.8 is crucial for the ringbuf syntax used
+ringbuf = "0.2.8"
+
+[features]
+default = []
+
+ml = [
+    "dep:tract-core",
+    "dep:tract-tflite",
+]
+
+gpu = [
+    "ml",
+    "dep:tract-metal",
+]
