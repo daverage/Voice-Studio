@@ -1,33 +1,19 @@
 //! Output Limiter
 //!
-//! # Perceptual Contract
-//! - **Target Source**: Final output signal.
-//! - **Intended Effect**: Catch true peaks to prevent digital clipping (-0.1 dBTP).
-//! - **Failure Modes**:
-//!   - Audible distortion/crunch if driven too hard (>6dB gain reduction).
-//! - **Will Not Do**:
-//!   - Color the sound (transparent design).
-//!   - Provide "glue" compression (this is purely for safety).
-//!
-//! # Lifecycle
-//! - **Active**: Normal operation.
-//! - **Bypassed**: Passes audio through (unsafe!).
+//! True peak safety limiter.
+//! Designed to be completely transparent and inert unless the signal
+//! exceeds the ceiling. No loudness riding, no pumping.
 
-use crate::dsp::utils::{db_to_lin, lin_to_db, time_constant_coeff, update_env_sq, DB_EPS};
+use crate::dsp::utils::{db_to_lin, lin_to_db, time_constant_coeff, DB_EPS};
 
-/// Stereo-linked VO limiter using hybrid RMS + peak detection.
-/// Drop-in replacement for LinkedLimiter.
 pub struct LinkedLimiter {
-    // RMS envelope (squared) per channel
-    env_sq_l: f32,
-    env_sq_r: f32,
-
-    // Peak envelope (linear)
+    // Peak envelope (linear, stereo linked)
     peak_env_l: f32,
     peak_env_r: f32,
 
     // Smoothed applied gain
     gain_smooth: f32,
+    gain_reduction_db: f32,
 
     sample_rate: f32,
 }
@@ -35,11 +21,10 @@ pub struct LinkedLimiter {
 impl LinkedLimiter {
     pub fn new(sr: f32) -> Self {
         Self {
-            env_sq_l: 0.0,
-            env_sq_r: 0.0,
             peak_env_l: 0.0,
             peak_env_r: 0.0,
             gain_smooth: 1.0,
+            gain_reduction_db: 0.0,
             sample_rate: sr,
         }
     }
@@ -54,24 +39,10 @@ impl LinkedLimiter {
         let abs_r = input_r.abs();
 
         // --------------------------------------------------
-        // 1. RMS detector (stable loudness reference)
+        // 1. True peak detector (fast attack, gentle release)
         // --------------------------------------------------
-        let rms_atk = self.coeff(10.0);
-        let rms_rel = self.coeff(120.0);
-
-        let sq_l = abs_l * abs_l;
-        let sq_r = abs_r * abs_r;
-
-        self.env_sq_l = update_env_sq(self.env_sq_l, sq_l, rms_atk, rms_rel);
-        self.env_sq_r = update_env_sq(self.env_sq_r, sq_r, rms_atk, rms_rel);
-
-        let rms = self.env_sq_l.max(self.env_sq_r).sqrt().max(DB_EPS);
-
-        // --------------------------------------------------
-        // 2. Peak detector (plosive / transient safety)
-        // --------------------------------------------------
-        let peak_atk = self.coeff(0.3); // extremely fast
-        let peak_rel = self.coeff(50.0); // smooth recovery
+        let peak_atk = self.coeff(0.1); // extremely fast catch
+        let peak_rel = self.coeff(60.0); // smooth envelope decay
 
         self.peak_env_l = if abs_l > self.peak_env_l {
             peak_atk * self.peak_env_l + (1.0 - peak_atk) * abs_l
@@ -88,17 +59,12 @@ impl LinkedLimiter {
         let peak = self.peak_env_l.max(self.peak_env_r).max(DB_EPS);
 
         // --------------------------------------------------
-        // 3. Hybrid detection
+        // 2. Limiting curve (only engages above ceiling)
         // --------------------------------------------------
-        let hybrid = (0.7 * rms + 0.3 * peak).max(DB_EPS);
+        let ceiling = 0.98; // ~ -0.18 dBTP
+        let knee_db = 1.0;
 
-        // --------------------------------------------------
-        // 4. Soft limiting curve
-        // --------------------------------------------------
-        let ceiling = 0.98;
-        let knee_db = 1.5;
-
-        let env_db = lin_to_db(hybrid);
+        let env_db = lin_to_db(peak);
         let ceiling_db = lin_to_db(ceiling);
         let over_db = env_db - ceiling_db;
 
@@ -114,23 +80,32 @@ impl LinkedLimiter {
         };
 
         // --------------------------------------------------
-        // 5. Gain smoothing (no pumping)
+        // 3. Gain smoothing (limiter-style)
         // --------------------------------------------------
-        let atk = self.coeff(1.0);
-        let rel = self.coeff(80.0);
+        let atk = self.coeff(0.5); // fast clamp
+        let rel = self.coeff(400.0); // slow, boring recovery
 
         if target_gain < self.gain_smooth {
+            // Gain reduction engages quickly
             self.gain_smooth = atk * self.gain_smooth + (1.0 - atk) * target_gain;
         } else {
+            // Release only when safely below ceiling
             self.gain_smooth = rel * self.gain_smooth + (1.0 - rel) * target_gain;
         }
+
+        self.gain_reduction_db = -lin_to_db(self.gain_smooth.max(DB_EPS));
 
         self.gain_smooth
     }
 
-    /// Get current gain reduction in dB (for metering)
-    #[allow(dead_code)]
     pub fn get_gain_reduction_db(&self) -> f32 {
-        lin_to_db(self.gain_smooth).abs()
+        self.gain_reduction_db
+    }
+
+    pub fn reset(&mut self) {
+        self.peak_env_l = 0.0;
+        self.peak_env_r = 0.0;
+        self.gain_smooth = 1.0;
+        self.gain_reduction_db = 0.0;
     }
 }

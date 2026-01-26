@@ -1,135 +1,77 @@
 //! De-Esser (Sibilance Reducer)
 //!
-//! # Perceptual Contract
-//! - **Target Source**: Sibilant speech (excessive 's', 'sh', 'ch', 't').
-//! - **Intended Effect**: Attenuate sibilance band momentarily when detected, without dulling the whole track.
-//! - **Failure Modes**:
-//!   - Lisping / "th-ing" if threshold is too low or reduction too deep.
-//!   - Dullness if attack is too fast or band is too wide.
-//! - **Will Not Do**:
-//!   - Remove broadband high frequencies (static EQ).
-//!   - Fix clipped sibilance.
+//! A dynamic equalizer designed to reduce harsh sibilant sounds (s, sh, ch) that occur
+//! in vocal recordings. Uses frequency-domain analysis to detect sibilance and applies
+//! targeted reduction in the 4.5-10kHz range.
 //!
-//! # Lifecycle
-//! - **Active**: Normal operation.
-//! - **Bypassed**: Passes audio through.
+//! # Purpose
+//! Controls harsh sibilant sounds without affecting the overall tonal balance of the voice.
+//! Operates as part of the dynamics processing stage in the signal chain.
+//!
+//! # Design Notes
+//! - Uses dual-band detection to distinguish sibilance from other high-frequency content
+//! - Applies reduction only when sibilance is detected above the threshold
+//! - Maintains natural consonant sounds while reducing harshness
 
+use crate::dsp::envelope::VoiceEnvelope;
 use crate::dsp::utils::{db_to_gain, lin_to_db, smoothstep, DB_EPS};
 use crate::dsp::Biquad;
 
-// Constants: unless marked "Must not change", these are tunable for behavior.
+// ---------------- Constants ----------------
 
-// Sibilance band high-pass cutoff (Hz).
-// Increasing: targets brighter sibilance; decreasing: includes more upper mids.
 const SIBILANCE_HPF_HZ: f32 = 4500.0;
-// Sibilance band filter Q (Butterworth-ish).
-// Increasing: narrower band; decreasing: wider band.
 const SIBILANCE_FILTER_Q: f32 = 0.707;
-// Sibilance band low-pass cutoff (Hz).
-// Increasing: includes more air; decreasing: tighter sibilance focus.
 const SIBILANCE_LPF_HZ: f32 = 10_000.0;
-// HF splitter low-pass cutoff (Hz) for "non-sibilant" reference.
-// Increasing: broader HF reference; decreasing: narrower reference.
+
 const HF_SPLIT_LPF_HZ: f32 = 3500.0;
-// HF splitter filter Q (Butterworth-ish).
-// Increasing: narrower split; decreasing: wider split.
 const HF_SPLIT_Q: f32 = 0.707;
-// Level envelope attack (seconds).
-// Increasing: slower level tracking; decreasing: faster tracking.
-const LEVEL_ATTACK_SEC: f32 = 0.005;
-// Level envelope release (seconds).
-// Increasing: smoother decay; decreasing: faster decay.
-const LEVEL_RELEASE_SEC: f32 = 0.200;
-// Sibilance detector attack (seconds).
-// Increasing: slower sibilance pickup; decreasing: faster pickup.
+
 const SIB_ATTACK_SEC: f32 = 0.0004;
-// Sibilance detector release (seconds).
-// Increasing: smoother decay; decreasing: faster decay.
 const SIB_RELEASE_SEC: f32 = 0.060;
-// ZCR smoothing time (seconds) for unvoiced weighting.
-// Increasing: smoother unvoiced detection; decreasing: more reactive.
+
 const ZC_SMOOTH_SEC: f32 = 0.030;
-// Unvoiced ZCR thresholds.
-// Increasing min/max: requires more ZCR to mark unvoiced; decreasing: easier to trigger.
 const UNVOICED_ZC_MIN: f32 = 0.02;
 const UNVOICED_ZC_MAX: f32 = 0.10;
-// HF energy weighting in focus calculation.
-// Increasing: reduces focus for wideband HF; decreasing: favors sibilance focus.
+
 const FOCUS_HF_WEIGHT: f32 = 0.6;
-// Focus curve thresholds.
-// Increasing: sibilance focus triggers later; decreasing: earlier.
 const FOCUS_MIN: f32 = 0.30;
 const FOCUS_MAX: f32 = 0.75;
-// Threshold scale relative to level envelope.
-// Increasing: harder to trigger de-essing; decreasing: more sensitive.
-const LEVEL_THRESH_SCALE: f32 = 0.12;
-// Minimum threshold to avoid log(0).
-// Increasing: more conservative at very low levels; decreasing: closer to raw.
-const LEVEL_THRESH_MIN: f32 = 1e-6;
-// De-esser ratio used to compute target reduction.
-// Increasing: stronger reduction per dB over; decreasing: gentler.
-const DE_ESS_RATIO: f32 = 6.0;
-// Maximum reduction in dB at amount=1.0 (DSP contract).
-// Must not change: UI amount maps to 18 dB maximum reduction.
-const MAX_REDUCTION_DB: f32 = 18.0;
-// Minimum allowed gain from the detector (linear).
-// Increasing: limits max reduction; decreasing: allows deeper cuts.
-const MIN_GAIN: f32 = 0.10;
-// Gain smoothing attack (seconds).
-// Increasing: slower gain reduction onset; decreasing: faster onset.
-const GAIN_ATTACK_SEC: f32 = 0.0015;
-// Gain smoothing release (seconds).
-// Increasing: slower recovery; decreasing: faster recovery.
-const GAIN_RELEASE_SEC: f32 = 0.080;
-// De-esser band frequency (Hz).
-// Increasing: higher notch; decreasing: lower notch.
-const DE_ESS_BAND_HZ: f32 = 7000.0;
-// De-esser band Q.
-// Increasing: narrower notch; decreasing: broader notch.
-const DE_ESS_BAND_Q: f32 = 1.0;
-// Amount below which the de-esser is bypassed (slightly higher threshold for de-esser
-// to account for its sensitivity to small amounts of processing).
-// Increasing: easier to bypass; decreasing: more likely to process.
-const DE_ESSER_BYPASS_EPS: f32 = 0.01;
-// Input floor to avoid denorm/zero in sibilance analysis.
-// Increasing: more conservative at silence; decreasing: closer to raw.
-const INPUT_FLOOR: f32 = 1e-25;
-// Gain threshold for bypassing the de-esser band filter.
-// Increasing: less likely to bypass; decreasing: more likely to bypass.
-const BAND_BYPASS_GAIN_EPS: f32 = 0.999;
 
-/// Shared detector for stereo-linked de-essing.
-///
-/// ## Metric Ownership (NONE - Corrective Only)
-/// This module does not own any target metrics.
-/// It operates as a corrective filter to keep sibilance inside target band.
-///
-/// This module must NOT attempt to modify:
-/// - RMS, crest factor, RMS variance (owned by Leveler)
-/// - Noise floor, SNR (owned by Denoiser)
-/// - Early/Late ratio, decay slope (owned by De-reverb)
-/// - Presence/Air ratios (owned by Proximity + Clarity)
-/// - HF variance (read-only guardrail metric)
-///
-/// ## Behavioral Rules
-/// - Disabled entirely when whisper detected
-/// - Slow, shallow reduction for borderline cases
+const LEVEL_THRESH_SCALE: f32 = 0.12;
+const LEVEL_THRESH_MIN: f32 = 1e-6;
+const LEVEL_THRESH_DB_FLOOR: f32 = -45.0;
+
+const DE_ESS_RATIO: f32 = 6.0;
+const MAX_REDUCTION_DB: f32 = 24.0;
+const MIN_GAIN: f32 = 0.10;
+
+const GAIN_ATTACK_SEC: f32 = 0.0015;
+const GAIN_RELEASE_SEC: f32 = 0.080;
+
+const DE_ESS_BAND_HZ: f32 = 7000.0;
+const DE_ESS_BAND_Q: f32 = 1.0;
+
+const DE_ESSER_BYPASS_EPS: f32 = 0.01;
+const INPUT_FLOOR: f32 = 1e-10;
+
+// ---------------- Detector ----------------
+
 pub struct DeEsserDetector {
     sib_hpf: Biquad,
     sib_lpf: Biquad,
-
     hf_lpf: Biquad,
 
-    level_env: f32,
     sib_env: f32,
     gain_smooth: f32,
 
-    prev_sib: f32,
+    prev_hf: f32,
     zc_env: f32,
 
     sample_rate: f32,
-    last_sibilance_weight: f32,
-    last_over_db: f32,
+
+    pub last_sibilance_weight: f32,
+    pub last_over_db: f32,
+    pub last_reduction_db: f32,
 }
 
 impl DeEsserDetector {
@@ -147,163 +89,141 @@ impl DeEsserDetector {
             sib_hpf,
             sib_lpf,
             hf_lpf,
-
-            level_env: 0.0,
             sib_env: 0.0,
             gain_smooth: 1.0,
-
-            prev_sib: 0.0,
+            prev_hf: 0.0,
             zc_env: 0.0,
-
             sample_rate: sr,
             last_sibilance_weight: 0.0,
             last_over_db: 0.0,
+            last_reduction_db: 0.0,
         }
     }
 
-    fn analyze_sibilance_weight(&mut self, input_l: f32, input_r: f32) -> f32 {
-        // ------------------------------------------------------------
-        // 1) Stereo-linked input (conservative)
-        // ------------------------------------------------------------
-        let x = input_l.abs().max(input_r.abs()) + INPUT_FLOOR;
-
-        // ------------------------------------------------------------
-        // 2) Extract sibilance band (linked)
-        // ------------------------------------------------------------
+    fn analyze_sibilance_weight(&mut self, x: f32) -> f32 {
         let sib = self.sib_lpf.process(self.sib_hpf.process(x));
         let sib_abs = sib.abs();
 
-        // ------------------------------------------------------------
-        // 3) Broad HF energy (linked)
-        // ------------------------------------------------------------
         let low = self.hf_lpf.process(x);
         let hf = x - low;
         let hf_abs = hf.abs();
 
-        // ------------------------------------------------------------
-        // 4) Broadband level envelope (linked)
-        // ------------------------------------------------------------
-        let level_attack = (-1.0 / (LEVEL_ATTACK_SEC * self.sample_rate)).exp();
-        let level_release = (-1.0 / (LEVEL_RELEASE_SEC * self.sample_rate)).exp();
-
-        if x > self.level_env {
-            self.level_env = level_attack * self.level_env + (1.0 - level_attack) * x;
+        let atk = (-1.0 / (SIB_ATTACK_SEC * self.sample_rate)).exp();
+        let rel = (-1.0 / (SIB_RELEASE_SEC * self.sample_rate)).exp();
+        self.sib_env = if sib_abs > self.sib_env {
+            atk * self.sib_env + (1.0 - atk) * sib_abs
         } else {
-            self.level_env = level_release * self.level_env + (1.0 - level_release) * x;
-        }
+            rel * self.sib_env + (1.0 - rel) * sib_abs
+        };
 
-        // ------------------------------------------------------------
-        // 5) Sibilance detector envelope
-        // ------------------------------------------------------------
-        let det_attack = (-1.0 / (SIB_ATTACK_SEC * self.sample_rate)).exp();
-        let det_release = (-1.0 / (SIB_RELEASE_SEC * self.sample_rate)).exp();
+        let sign = hf.signum();
+        let prev = self.prev_hf.signum();
+        let zc = if sign != prev { 1.0 } else { 0.0 };
+        self.prev_hf = hf;
 
-        if sib_abs > self.sib_env {
-            self.sib_env = det_attack * self.sib_env + (1.0 - det_attack) * sib_abs;
-        } else {
-            self.sib_env = det_release * self.sib_env + (1.0 - det_release) * sib_abs;
-        }
-
-        // ------------------------------------------------------------
-        // 6) Unvoiced weighting (linked ZCR)
-        // ------------------------------------------------------------
-        let sign = sib.signum();
-        let prev_sign = self.prev_sib.signum();
-        let zc = if sign != prev_sign { 1.0 } else { 0.0 };
-        self.prev_sib = sib;
-
-        let zc_smooth = (-1.0 / (ZC_SMOOTH_SEC * self.sample_rate)).exp();
-        self.zc_env = zc_smooth * self.zc_env + (1.0 - zc_smooth) * zc;
+        let zc_s = (-1.0 / (ZC_SMOOTH_SEC * self.sample_rate)).exp();
+        self.zc_env = zc_s * self.zc_env + (1.0 - zc_s) * zc;
 
         let unvoiced = smoothstep(UNVOICED_ZC_MIN, UNVOICED_ZC_MAX, self.zc_env).clamp(0.0, 1.0);
 
-        // ------------------------------------------------------------
-        // 7) Focus weighting (sib vs HF)
-        // ------------------------------------------------------------
         let focus =
-            (self.sib_env / (self.sib_env + (hf_abs * FOCUS_HF_WEIGHT) + DB_EPS)).clamp(0.0, 1.0);
+            (self.sib_env / (self.sib_env + hf_abs * FOCUS_HF_WEIGHT + DB_EPS)).clamp(0.0, 1.0);
         let focus_w = smoothstep(FOCUS_MIN, FOCUS_MAX, focus);
 
         (unvoiced * focus_w).clamp(0.0, 1.0)
     }
 
-    /// amount: 0..1
-    pub fn compute_gain(&mut self, input_l: f32, input_r: f32, amount: f32) -> f32 {
+    pub fn compute_gain(
+        &mut self,
+        l: f32,
+        r: f32,
+        amount: f32,
+        env_l: &VoiceEnvelope,
+        env_r: &VoiceEnvelope,
+    ) -> f32 {
         let amount = amount.clamp(0.0, 1.0);
-        let sibilance_weight = self.analyze_sibilance_weight(input_l, input_r);
-        self.last_sibilance_weight = sibilance_weight;
+        let x = l.abs().max(r.abs()) + INPUT_FLOOR;
 
-        // ------------------------------------------------------------
-        // 8) Level-relative threshold
-        // ------------------------------------------------------------
-        let threshold = (self.level_env * LEVEL_THRESH_SCALE).max(LEVEL_THRESH_MIN);
+        let weight = self.analyze_sibilance_weight(x);
+        self.last_sibilance_weight = weight;
+
+        // Use shared slow envelope (max of L/R) for level threshold
+        let level_env = env_l.slow.max(env_r.slow);
+        let lin_thr = (level_env * LEVEL_THRESH_SCALE).max(LEVEL_THRESH_MIN);
+        let thr_db = lin_to_db(lin_thr).max(LEVEL_THRESH_DB_FLOOR);
 
         let env_db = lin_to_db(self.sib_env.max(LEVEL_THRESH_MIN));
-        let thr_db = lin_to_db(threshold);
         let over_db = (env_db - thr_db).max(0.0);
         self.last_over_db = over_db;
 
         if amount < DE_ESSER_BYPASS_EPS {
-            self.gain_smooth = 1.0;
-            return 1.0;
+            let rel = (-1.0 / (GAIN_RELEASE_SEC * self.sample_rate)).exp();
+            self.gain_smooth = rel * self.gain_smooth + (1.0 - rel);
+            return self.gain_smooth;
         }
 
-        let ratio = DE_ESS_RATIO;
-        let max_red_db = MAX_REDUCTION_DB * amount;
+        let knee = smoothstep(0.0, 6.0, over_db);
+        let target_red = (knee * over_db * (DE_ESS_RATIO - 1.0)).min(MAX_REDUCTION_DB * amount);
 
-        let target_red_db = (over_db * (ratio - 1.0)).min(max_red_db);
-        let target_gain_db = -target_red_db * sibilance_weight;
-        let target_gain = db_to_gain(target_gain_db).clamp(MIN_GAIN, 1.0);
+        let target_gain = db_to_gain(-target_red * weight).clamp(MIN_GAIN, 1.0);
 
-        // ------------------------------------------------------------
-        // 9) Gain smoothing
-        // ------------------------------------------------------------
-        let g_attack = (-1.0 / (GAIN_ATTACK_SEC * self.sample_rate)).exp();
-        let g_release = (-1.0 / (GAIN_RELEASE_SEC * self.sample_rate)).exp();
+        let atk = (-1.0 / (GAIN_ATTACK_SEC * self.sample_rate)).exp();
+        let rel = (-1.0 / (GAIN_RELEASE_SEC * self.sample_rate)).exp();
 
-        if target_gain < self.gain_smooth {
-            self.gain_smooth = g_attack * self.gain_smooth + (1.0 - g_attack) * target_gain;
+        self.gain_smooth = if target_gain < self.gain_smooth {
+            atk * self.gain_smooth + (1.0 - atk) * target_gain
         } else {
-            self.gain_smooth = g_release * self.gain_smooth + (1.0 - g_release) * target_gain;
-        }
+            rel * self.gain_smooth + (1.0 - rel) * target_gain
+        };
+
+        self.last_reduction_db = -lin_to_db(self.gain_smooth).max(-MAX_REDUCTION_DB);
 
         self.gain_smooth
     }
 
-    /// Get current gain reduction in dB (for metering)
-    #[allow(dead_code)]
     pub fn get_gain_reduction_db(&self) -> f32 {
-        lin_to_db(self.gain_smooth).abs()
+        self.last_reduction_db
+    }
+
+    pub fn reset(&mut self) {
+        self.last_reduction_db = 0.0;
     }
 }
 
-/// Per-channel application band
+// ---------------- Band ----------------
+
 pub struct DeEsserBand {
     filter: Biquad,
+    last_cut_db: f32,
     sample_rate: f32,
 }
 
 impl DeEsserBand {
-    pub fn new(sample_rate: f32) -> Self {
+    pub fn new(sr: f32) -> Self {
         let mut filter = Biquad::new();
-        // Dynamic peaking cut around 7kHz
-        filter.update_peaking(DE_ESS_BAND_HZ, DE_ESS_BAND_Q, 0.0, sample_rate);
+        filter.update_peaking(DE_ESS_BAND_HZ, DE_ESS_BAND_Q, 0.0, sr);
         Self {
             filter,
-            sample_rate,
+            last_cut_db: 0.0,
+            sample_rate: sr,
         }
     }
 
-    pub fn apply(&mut self, input: f32, gain: f32) -> f32 {
-        // Always run the filter to keep state updated (prevents pops on engage)
-        let cut_db = if gain > BAND_BYPASS_GAIN_EPS {
-            0.0
-        } else {
-            lin_to_db(gain)
-        };
+    pub fn update(&mut self, gain: f32) {
+        let cut_db = lin_to_db(gain).max(-MAX_REDUCTION_DB);
+        if (cut_db - self.last_cut_db).abs() > 0.1 {
+            self.filter
+                .update_peaking(DE_ESS_BAND_HZ, DE_ESS_BAND_Q, cut_db, self.sample_rate);
+            self.last_cut_db = cut_db;
+        }
+    }
 
-        self.filter
-            .update_peaking(DE_ESS_BAND_HZ, DE_ESS_BAND_Q, cut_db, self.sample_rate);
-        self.filter.process(input)
+    pub fn process(&mut self, x: f32) -> f32 {
+        self.filter.process(x)
+    }
+
+    pub fn apply(&mut self, sample: f32, gain: f32) -> f32 {
+        self.update(gain);
+        self.process(sample)
     }
 }

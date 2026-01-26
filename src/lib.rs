@@ -1,22 +1,32 @@
+mod debug;
 mod dsp;
 mod macro_controller;
 mod meters;
+mod presets;
 mod ui;
 
-use dsp::{
-    ChannelProcessor, ClarityDetector, DeEsserDetector, DenoiseConfig, EarlyReflectionSuppressor,
-    LinkedCompressor, LinkedLimiter, ProfileAnalyzer, SpectralGuardrails,
-    SpeechConfidenceEstimator, SpeechExpander, StereoStreamingDenoiser,
+use crate::dsp::{
+    Biquad, BreathReducer, ChannelProcessor, ClarityDetector, DeEsserDetector, DenoiseConfig,
+    EarlyReflectionSuppressor, LinkedCompressor, LinkedLimiter, PinkRefBias, PlosiveSoftener,
+    ProfileAnalyzer, SpectralGuardrails, SpeechConfidenceEstimator, SpeechExpander, SpeechHpf,
+    StereoStreamingDenoiser,
 };
-use macro_controller::MacroController;
-use meters::Meters;
+use crate::macro_controller::{compute_simple_macro_targets, SimpleMacroTargets};
+use crate::meters::Meters;
+use ebur128::{EbuR128, Mode};
 use nih_plug::prelude::*;
 use nih_plug_vizia::vizia::prelude::ContextProxy;
 use nih_plug_vizia::{create_vizia_editor, ViziaState, ViziaTheming};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use ui::build_ui;
 
-const DE_ESS_RMS_TAU_SEC: f32 = 0.01;
+const DE_ESS_RMS_TAU_SEC: f32 = 0.050;
+const DEFAULT_SAMPLE_RATE: f32 = 44100.0;
+
+const LOUDNESS_PUMP_DELTA_DB: f32 = 2.0;
+const LIMITER_PUMP_THRESHOLD_DB: f32 = 1.5;
+const PUMP_LOG_COOLDOWN_BUFFERS: u32 = 50;
 
 // =============================================================================
 // TASK 1: CANONICAL DATA STRUCTURES (Data-Driven Calibration)
@@ -213,6 +223,9 @@ pub struct VoiceParams {
     #[id = "noise_tone"]
     pub noise_tone: FloatParam,
 
+    #[id = "noise_mode"]
+    pub noise_mode: EnumParam<presets::NoiseMode>,
+
     #[id = "reverb_reduction"]
     pub reverb_reduction: FloatParam,
 
@@ -231,23 +244,8 @@ pub struct VoiceParams {
     #[id = "output_gain"]
     pub output_gain: FloatParam,
 
-    // -------------------------------------------------------------------------
-    // PREVIEW CONTROLS (Subtractive effects only)
-    // -------------------------------------------------------------------------
-    // Note: Only subtractive effects should have preview - it lets you hear
-    // what is being REMOVED from the signal. Additive/gain effects don't
-    // have meaningful previews.
-    /// Preview denoise removal (hear the noise being cut)
-    #[id = "preview_denoise"]
-    pub preview_denoise: BoolParam,
-
-    /// Preview de-verb removal (hear the reverb being cut)
-    #[id = "preview_deverb"]
-    pub preview_deverb: BoolParam,
-
-    /// Preview de-esser removal (hear the sibilance being cut)
-    #[id = "preview_deesser"]
-    pub preview_deesser: BoolParam,
+    #[id = "breath_control"]
+    pub breath_control: FloatParam,
 
     #[id = "use_ml"]
     pub use_ml: BoolParam,
@@ -269,6 +267,22 @@ pub struct VoiceParams {
 
     #[id = "macro_consistency"]
     pub macro_consistency: FloatParam,
+
+    /// Trigger a full plugin reset (internal buffers and state)
+    #[id = "reset_all"]
+    pub reset_all: BoolParam,
+
+    // -------------------------------------------------------------------------
+    // DSP FACTORY PRESETS
+    // -------------------------------------------------------------------------
+    #[id = "dsp_preset"]
+    pub dsp_preset: EnumParam<presets::DspPreset>,
+
+    // -------------------------------------------------------------------------
+    // FINAL OUTPUT PRESETS
+    // -------------------------------------------------------------------------
+    #[id = "final_output_preset"]
+    pub final_output_preset: EnumParam<presets::OutputPreset>,
 }
 
 // Helper to format values as "50%" for the DAW display
@@ -306,6 +320,7 @@ struct VoiceStudioPlugin {
 
     // Core DSP modules
     denoiser: StereoStreamingDenoiser,
+    pink_ref_bias: PinkRefBias,
     clarity_detector: ClarityDetector,
     linked_de_esser: DeEsserDetector,
     linked_compressor: LinkedCompressor,
@@ -318,15 +333,34 @@ struct VoiceStudioPlugin {
     speech_expander: SpeechExpander,
     spectral_guardrails: SpectralGuardrails,
 
+    // Hidden hygiene and automatic protection
+    speech_hpf: SpeechHpf,
+    plosive_softener_l: PlosiveSoftener,
+    plosive_softener_r: PlosiveSoftener,
+    breath_reducer_l: BreathReducer,
+    breath_reducer_r: BreathReducer,
+
+    // Speech band energy protection (300Hz - 3kHz)
+    speech_band_pre_l: Biquad,
+    speech_band_pre_r: Biquad,
+    speech_band_post_l: Biquad,
+    speech_band_post_r: Biquad,
+    speech_band_pre_lpf_l: Biquad,
+    speech_band_pre_lpf_r: Biquad,
+    speech_band_post_lpf_l: Biquad,
+    speech_band_post_lpf_r: Biquad,
+
+    // Loudness preservation trackers
+    pre_rms_env: f32,
+    post_rms_env: f32,
+    loudness_comp_gain: f32,
+
     // Profile analyzers for data-driven calibration
     // INVARIANT: input_profile_analyzer processes ONLY pre-DSP samples
     // INVARIANT: output_profile_analyzer processes ONLY post-DSP samples
     // INVARIANT: No mid-chain re-measurement feeds control logic
     input_profile_analyzer: ProfileAnalyzer,
     output_profile_analyzer: ProfileAnalyzer,
-
-    // Macro controller
-    macro_controller: MacroController,
 
     // Spectral control slew limiters (artifact prevention)
     control_limiters: dsp::SpectralControlLimiters,
@@ -340,8 +374,27 @@ struct VoiceStudioPlugin {
     de_ess_rms_sq_l: f32,
     de_ess_rms_sq_r: f32,
 
+    // Preset manager
+    preset_manager: presets::PresetManager,
+
+    // Preset loudness/true-peak processing
+    loudness_meter: Option<EbuR128>,
+    preset_gain_db: f32,
+    preset_gain_lin: f32,
+    last_output_preset: presets::OutputPreset,
+    preset_interleaved: Vec<f32>,
+
+    // Mode switch crossfade
+    macro_xfade_samples_left: u32,
+    macro_xfade_samples_total: u32,
+    macro_xfade_to_macro: bool,
+    last_macro_mode: bool,
+
     // Debug logging (rate-limited)
+    #[cfg(feature = "debug")]
     debug_log_counter: u32,
+    pump_log_cooldown: u32,
+    prev_loudness_comp_gain: f32,
 }
 
 impl Default for VoiceStudioPlugin {
@@ -363,6 +416,8 @@ impl Default for VoiceStudioPlugin {
                 )
                 .with_value_to_string(Arc::new(format_tone))
                 .with_smoother(SmoothingStyle::Linear(50.0)),
+
+                noise_mode: EnumParam::new("Noise Mode", presets::NoiseMode::Normal),
 
                 reverb_reduction: FloatParam::new(
                     "De-Verb (Room)",
@@ -411,10 +466,13 @@ impl Default for VoiceStudioPlugin {
                 .with_value_to_string(Arc::new(format_db))
                 .with_smoother(SmoothingStyle::Linear(50.0)),
 
-                // Preview controls (subtractive effects only - radio button behavior)
-                preview_denoise: BoolParam::new("Preview Noise", false),
-                preview_deverb: BoolParam::new("Preview De-Verb", false),
-                preview_deesser: BoolParam::new("Preview De-Esser", false),
+                breath_control: FloatParam::new(
+                    "Breath Control",
+                    0.25,
+                    FloatRange::Linear { min: 0.0, max: 1.0 },
+                )
+                .with_value_to_string(Arc::new(format_percent))
+                .with_smoother(SmoothingStyle::Linear(50.0)),
 
                 use_ml: BoolParam::new("Use ML Advisor", true),
 
@@ -443,33 +501,58 @@ impl Default for VoiceStudioPlugin {
                 )
                 .with_value_to_string(Arc::new(format_percent))
                 .with_smoother(SmoothingStyle::Linear(50.0)),
+
+                reset_all: BoolParam::new("Reset Plugin", false),
+
+                dsp_preset: EnumParam::new("DSP Preset", presets::DspPreset::Manual),
+
+                final_output_preset: EnumParam::new("Final Output", presets::OutputPreset::None),
             }),
-            editor_state: ViziaState::new(|| (760, 480)),
-            process_l: ChannelProcessor::new(2048, 512, 44100.0),
-            process_r: ChannelProcessor::new(2048, 512, 44100.0),
-            sample_rate: 44100.0,
+            editor_state: ViziaState::new(|| (900, 550)),
+            process_l: ChannelProcessor::new(2048, 512, DEFAULT_SAMPLE_RATE),
+            process_r: ChannelProcessor::new(2048, 512, DEFAULT_SAMPLE_RATE),
+            sample_rate: DEFAULT_SAMPLE_RATE,
             ui_proxy: Arc::new(Mutex::new(None)),
 
             // Core DSP modules
-            denoiser: StereoStreamingDenoiser::new(2048, 512),
-            clarity_detector: ClarityDetector::new(44100.0),
-            linked_de_esser: DeEsserDetector::new(44100.0),
-            linked_compressor: LinkedCompressor::new(44100.0),
-            linked_limiter: LinkedLimiter::new(44100.0),
+            denoiser: StereoStreamingDenoiser::new(2048, 512, DEFAULT_SAMPLE_RATE),
+            pink_ref_bias: PinkRefBias::new(DEFAULT_SAMPLE_RATE),
+            clarity_detector: ClarityDetector::new(DEFAULT_SAMPLE_RATE),
+            linked_de_esser: DeEsserDetector::new(DEFAULT_SAMPLE_RATE),
+            linked_compressor: LinkedCompressor::new(DEFAULT_SAMPLE_RATE),
+            linked_limiter: LinkedLimiter::new(DEFAULT_SAMPLE_RATE),
 
             // New Easy Mode DSP modules
-            speech_confidence: SpeechConfidenceEstimator::new(44100.0),
-            early_reflection_l: EarlyReflectionSuppressor::new(44100.0),
-            early_reflection_r: EarlyReflectionSuppressor::new(44100.0),
-            speech_expander: SpeechExpander::new(44100.0),
-            spectral_guardrails: SpectralGuardrails::new(44100.0),
+            speech_confidence: SpeechConfidenceEstimator::new(DEFAULT_SAMPLE_RATE),
+            early_reflection_l: EarlyReflectionSuppressor::new(DEFAULT_SAMPLE_RATE),
+            early_reflection_r: EarlyReflectionSuppressor::new(DEFAULT_SAMPLE_RATE),
+            speech_expander: SpeechExpander::new(DEFAULT_SAMPLE_RATE),
+            spectral_guardrails: SpectralGuardrails::new(DEFAULT_SAMPLE_RATE),
+
+            speech_hpf: SpeechHpf::new(DEFAULT_SAMPLE_RATE),
+            plosive_softener_l: PlosiveSoftener::new(DEFAULT_SAMPLE_RATE),
+            plosive_softener_r: PlosiveSoftener::new(DEFAULT_SAMPLE_RATE),
+            breath_reducer_l: BreathReducer::new(DEFAULT_SAMPLE_RATE),
+            breath_reducer_r: BreathReducer::new(DEFAULT_SAMPLE_RATE),
+
+            speech_band_pre_l: Biquad::new(),
+            speech_band_pre_r: Biquad::new(),
+            speech_band_post_l: Biquad::new(),
+            speech_band_post_r: Biquad::new(),
+            speech_band_pre_lpf_l: Biquad::new(),
+            speech_band_pre_lpf_r: Biquad::new(),
+            speech_band_post_lpf_l: Biquad::new(),
+            speech_band_post_lpf_r: Biquad::new(),
+
+            pre_rms_env: 0.0,
+            post_rms_env: 0.0,
+            loudness_comp_gain: 1.0,
 
             // Profile analyzers for data-driven calibration
-            input_profile_analyzer: ProfileAnalyzer::new(44100.0),
-            output_profile_analyzer: ProfileAnalyzer::new(44100.0),
+            input_profile_analyzer: ProfileAnalyzer::new(DEFAULT_SAMPLE_RATE),
+            output_profile_analyzer: ProfileAnalyzer::new(DEFAULT_SAMPLE_RATE),
 
             // Macro controller
-            macro_controller: MacroController::new(),
 
             // Spectral control slew limiters (artifact prevention)
             control_limiters: dsp::SpectralControlLimiters::new(),
@@ -482,13 +565,29 @@ impl Default for VoiceStudioPlugin {
             peak_output_r: 0.0,
             de_ess_rms_sq_l: 0.0,
             de_ess_rms_sq_r: 0.0,
+            // Preset manager (lightweight initialization)
+            preset_manager: presets::PresetManager::empty(),
+
+            loudness_meter: None,
+            preset_gain_db: 0.0,
+            preset_gain_lin: 1.0,
+            last_output_preset: presets::OutputPreset::None,
+            preset_interleaved: Vec::new(),
+
+            macro_xfade_samples_left: 0,
+            macro_xfade_samples_total: 0,
+            macro_xfade_to_macro: false,
+            last_macro_mode: true,
+            #[cfg(feature = "debug")]
             debug_log_counter: 0,
+            pump_log_cooldown: 0,
+            prev_loudness_comp_gain: 1.0,
         }
     }
 }
 
 impl Plugin for VoiceStudioPlugin {
-    const NAME: &'static str = "Voice Studio";
+    const NAME: &'static str = "VxCleaner";
     const VENDOR: &'static str = "Andrzej Marczewski";
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
@@ -516,35 +615,83 @@ impl Plugin for VoiceStudioPlugin {
         buffer_config: &BufferConfig,
         _context: &mut impl InitContext<Self>,
     ) -> bool {
-        self.sample_rate = buffer_config.sample_rate;
-        self.process_l = ChannelProcessor::new(2048, 512, self.sample_rate);
-        self.process_r = ChannelProcessor::new(2048, 512, self.sample_rate);
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.sample_rate = buffer_config.sample_rate;
+            self.process_l = ChannelProcessor::new(2048, 512, self.sample_rate);
+            self.process_r = ChannelProcessor::new(2048, 512, self.sample_rate);
 
-        // Core DSP modules
-        self.denoiser = StereoStreamingDenoiser::new(2048, 512);
-        self.clarity_detector = ClarityDetector::new(self.sample_rate);
-        self.linked_de_esser = DeEsserDetector::new(self.sample_rate);
-        self.linked_compressor = LinkedCompressor::new(self.sample_rate);
-        self.linked_limiter = LinkedLimiter::new(self.sample_rate);
+            // Core DSP modules
+            self.denoiser = StereoStreamingDenoiser::new(2048, 512, self.sample_rate);
+            self.denoiser.prepare(self.sample_rate); // Load neural models safely here
 
-        // New Easy Mode DSP modules
-        self.speech_confidence = SpeechConfidenceEstimator::new(self.sample_rate);
-        self.early_reflection_l = EarlyReflectionSuppressor::new(self.sample_rate);
-        self.early_reflection_r = EarlyReflectionSuppressor::new(self.sample_rate);
-        self.speech_expander = SpeechExpander::new(self.sample_rate);
-        self.spectral_guardrails = SpectralGuardrails::new(self.sample_rate);
+            self.pink_ref_bias = PinkRefBias::new(self.sample_rate);
+            self.clarity_detector = ClarityDetector::new(self.sample_rate);
+            self.linked_de_esser = DeEsserDetector::new(self.sample_rate);
+            self.linked_compressor = LinkedCompressor::new(self.sample_rate);
+            self.linked_limiter = LinkedLimiter::new(self.sample_rate);
 
-        // Profile analyzers for data-driven calibration
-        self.input_profile_analyzer = ProfileAnalyzer::new(self.sample_rate);
-        self.output_profile_analyzer = ProfileAnalyzer::new(self.sample_rate);
+            // New Easy Mode DSP modules
+            self.speech_confidence = SpeechConfidenceEstimator::new(self.sample_rate);
+            self.early_reflection_l = EarlyReflectionSuppressor::new(self.sample_rate);
+            self.early_reflection_r = EarlyReflectionSuppressor::new(self.sample_rate);
+            self.speech_expander = SpeechExpander::new(self.sample_rate);
+            self.spectral_guardrails = SpectralGuardrails::new(self.sample_rate);
 
-        self.de_ess_rms_sq_l = 0.0;
-        self.de_ess_rms_sq_r = 0.0;
+            self.speech_hpf = SpeechHpf::new(self.sample_rate);
+            self.plosive_softener_l = PlosiveSoftener::new(self.sample_rate);
+            self.plosive_softener_r = PlosiveSoftener::new(self.sample_rate);
+            self.breath_reducer_l = BreathReducer::new(self.sample_rate);
+            self.breath_reducer_r = BreathReducer::new(self.sample_rate);
 
-        // Latency: Denoise (1 win) + Deverb (1 win) = 2 windows
-        // Window size is 2048
-        _context.set_latency_samples(2048 * 2);
-        true
+            // Speech band: 300Hz HPF + 3kHz LPF
+            self.speech_band_pre_l
+                .update_hpf(300.0, 0.5, self.sample_rate);
+            self.speech_band_pre_r
+                .update_hpf(300.0, 0.5, self.sample_rate);
+            self.speech_band_post_l
+                .update_hpf(300.0, 0.5, self.sample_rate);
+            self.speech_band_post_r
+                .update_hpf(300.0, 0.5, self.sample_rate);
+            self.speech_band_pre_lpf_l
+                .update_lpf(3000.0, 0.5, self.sample_rate);
+            self.speech_band_pre_lpf_r
+                .update_lpf(3000.0, 0.5, self.sample_rate);
+            self.speech_band_post_lpf_l
+                .update_lpf(3000.0, 0.5, self.sample_rate);
+            self.speech_band_post_lpf_r
+                .update_lpf(3000.0, 0.5, self.sample_rate);
+
+            self.pre_rms_env = 0.0;
+            self.post_rms_env = 0.0;
+            self.loudness_comp_gain = 1.0;
+
+            // Profile analyzers for data-driven calibration
+            self.input_profile_analyzer = ProfileAnalyzer::new(self.sample_rate);
+            self.output_profile_analyzer = ProfileAnalyzer::new(self.sample_rate);
+
+            self.de_ess_rms_sq_l = 0.0;
+            self.de_ess_rms_sq_r = 0.0;
+
+            // Initialize preset manager (non-fatal)
+            self.preset_manager = presets::PresetManager::new();
+            self.preset_interleaved = vec![0.0; buffer_config.max_buffer_size as usize * 2];
+            self.loudness_meter =
+                EbuR128::new(2, self.sample_rate as u32, Mode::I | Mode::TRUE_PEAK).ok();
+            self.preset_gain_db = 0.0;
+            self.preset_gain_lin = 1.0;
+            self.last_output_preset = self.params.final_output_preset.value();
+
+            self.macro_xfade_samples_left = 0;
+            self.macro_xfade_samples_total = 0;
+            self.macro_xfade_to_macro = self.params.macro_mode.value();
+            self.last_macro_mode = self.params.macro_mode.value();
+
+            // Latency: Denoise (1 win) + Deverb (1 win) = 2 windows
+            // Window size is 2048
+            _context.set_latency_samples(2048 * 2);
+            true
+        }))
+        .unwrap_or(false)
     }
 
     fn editor(&mut self, _async_executor: AsyncExecutor<Self>) -> Option<Box<dyn Editor>> {
@@ -576,23 +723,86 @@ impl Plugin for VoiceStudioPlugin {
         _aux: &mut AuxiliaryBuffers,
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.process_internal(buffer, _aux, _context)
+        }))
+        .unwrap_or(ProcessStatus::Normal)
+    }
+
+    fn reset(&mut self) {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.denoiser.reset();
+            self.pink_ref_bias.reset();
+            self.process_l.envelope_tracker.reset();
+            self.process_r.envelope_tracker.reset();
+            self.process_l.restoration_chain.deverber.reset();
+            self.process_r.restoration_chain.deverber.reset();
+            self.linked_compressor.reset();
+            self.linked_de_esser.reset();
+            self.linked_limiter.reset();
+            self.speech_confidence.reset();
+            self.early_reflection_l.reset();
+            self.early_reflection_r.reset();
+            self.speech_expander.reset();
+            self.spectral_guardrails.reset();
+            self.speech_hpf.reset();
+            self.plosive_softener_l.reset();
+            self.plosive_softener_r.reset();
+            self.breath_reducer_l.reset();
+            self.breath_reducer_r.reset();
+            self.input_profile_analyzer.reset();
+            self.output_profile_analyzer.reset();
+            self.meters.reset();
+
+            self.loudness_meter =
+                EbuR128::new(2, self.sample_rate as u32, Mode::I | Mode::TRUE_PEAK).ok();
+            self.preset_gain_db = 0.0;
+            self.preset_gain_lin = 1.0;
+            self.last_output_preset = self.params.final_output_preset.value();
+            self.macro_xfade_samples_left = 0;
+            self.macro_xfade_samples_total = 0;
+            self.macro_xfade_to_macro = self.params.macro_mode.value();
+            self.last_macro_mode = self.params.macro_mode.value();
+
+            // Reset local peak trackers
+            self.peak_input_l = -80.0;
+            self.peak_input_r = -80.0;
+            self.peak_output_l = -80.0;
+            self.peak_output_r = -80.0;
+            self.pump_log_cooldown = 0;
+            self.prev_loudness_comp_gain = 1.0;
+        }))
+        .unwrap_or(());
+    }
+}
+
+impl VoiceStudioPlugin {
+    fn process_internal(
+        &mut self,
+        buffer: &mut Buffer,
+        _aux: &mut AuxiliaryBuffers,
+        _context: &mut impl ProcessContext<Self>,
+    ) -> ProcessStatus {
+        if self.params.reset_all.value() {
+            self.reset();
+        }
+
         const MAX_GAIN: f32 = 2.0;
+
+        // Note: DSP preset parameter changes are handled in the UI thread
+        // when the user selects a preset from the dropdown. The preset
+        // selection itself is stored as a parameter for DAW automation.
 
         // =====================================================================
         // MACRO MODE HANDLING
         // =====================================================================
         let macro_mode = self.params.macro_mode.value();
 
-        if macro_mode {
-            use macro_controller::MacroState;
-            self.macro_controller.set_state(MacroState {
-                distance: self.params.macro_distance.value(),
-                clarity: self.params.macro_clarity.value(),
-                consistency: self.params.macro_consistency.value(),
-                active: true,
-            });
-        } else {
-            self.macro_controller.set_active(false);
+        if macro_mode != self.last_macro_mode {
+            self.macro_xfade_samples_total = (0.046 * self.sample_rate).round().max(1.0) as u32;
+            self.macro_xfade_samples_left = self.macro_xfade_samples_total;
+            self.macro_xfade_to_macro = macro_mode;
+            self.last_macro_mode = macro_mode;
         }
 
         // INVARIANT:
@@ -602,87 +812,159 @@ impl Plugin for VoiceStudioPlugin {
 
         // Conditions are updated at end-of-buffer via update_input_profile().
         // We read the last-known values here for stability guards.
-        let conditions = self.macro_controller.get_conditions();
-        let whisper = conditions.whisper;
-        let noisy = conditions.noisy_environment;
+        let whisper = false;
+        let noisy = false;
 
         // Compute macro targets once per buffer and reuse them.
         let frame_count_est = buffer.samples() as usize;
-        let macro_targets = if macro_mode {
-            Some(self.macro_controller.update_smooth(frame_count_est))
-        } else {
-            None
+        let macro_targets = compute_simple_macro_targets(&self.params);
+        let advanced_targets = SimpleMacroTargets {
+            noise_reduction: self.params.noise_reduction.value(),
+            reverb_reduction: self.params.reverb_reduction.value(),
+            proximity: self.params.proximity.value(),
+            clarity: self.params.clarity.value(),
+            de_esser: self.params.de_esser.value(),
+            noise_tone: self.params.noise_tone.value(),
+            leveler: self.params.leveler.value(),
+            breath_control: self.params.breath_control.value(),
         };
 
-        // Advanced user parameters (still the source of truth)
-        let user_clarity = (self.params.clarity.value() * MAX_GAIN).clamp(0.0, 1.0);
-
-        // Macro clarity is light touch: it can only CAP user clarity, never boost it.
-        let clarity_amt_pre_limit = if let Some(t) = macro_targets {
-            user_clarity.min(t.clarity_cap)
-        } else {
-            user_clarity
-        };
-
-        // Resolve either macro-driven values or direct parameter values
-        let (raw_noise, noise_tone, raw_reverb, raw_prox, raw_de_ess, level_amt) =
-            if let Some(t) = macro_targets {
-                (
-                    (t.noise_reduction * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                    t.noise_tone,
-                    t.reverb_reduction.clamp(0.0, 1.0),
-                    (t.proximity * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                    (t.de_esser * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                    (t.leveler * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                )
+        let mut macro_blend = if macro_mode { 1.0 } else { 0.0 };
+        if self.macro_xfade_samples_left > 0 {
+            let elapsed = (self.macro_xfade_samples_total - self.macro_xfade_samples_left) as f32;
+            let t = (elapsed / self.macro_xfade_samples_total as f32).clamp(0.0, 1.0);
+            macro_blend = if self.macro_xfade_to_macro {
+                t
             } else {
-                (
-                    (self.params.noise_reduction.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                    self.params.noise_tone.value(),
-                    (self.params.reverb_reduction.value() * MAX_GAIN).clamp(0.0, 1.0),
-                    (self.params.proximity.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                    (self.params.de_esser.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                    (self.params.leveler.value() * MAX_GAIN).clamp(0.0, MAX_GAIN),
-                )
+                1.0 - t
             };
+            self.macro_xfade_samples_left = self
+                .macro_xfade_samples_left
+                .saturating_sub(frame_count_est as u32);
+        }
+
+        let blend = |a: f32, b: f32| a + (b - a) * macro_blend;
+
+        let raw_noise = (blend(
+            advanced_targets.noise_reduction,
+            macro_targets.noise_reduction,
+        ) * MAX_GAIN)
+            .clamp(0.0, MAX_GAIN);
+        let noise_tone = blend(advanced_targets.noise_tone, macro_targets.noise_tone);
+        let raw_reverb = (blend(
+            advanced_targets.reverb_reduction,
+            macro_targets.reverb_reduction,
+        ) * MAX_GAIN)
+            .clamp(0.0, 1.0);
+        let raw_prox = (blend(advanced_targets.proximity, macro_targets.proximity) * MAX_GAIN)
+            .clamp(0.0, MAX_GAIN);
+        let raw_de_ess = (blend(advanced_targets.de_esser, macro_targets.de_esser) * MAX_GAIN)
+            .clamp(0.0, MAX_GAIN);
+        let level_amt = (blend(advanced_targets.leveler, macro_targets.leveler) * MAX_GAIN)
+            .clamp(0.0, MAX_GAIN);
+        let raw_clarity = (blend(advanced_targets.clarity, macro_targets.clarity) * MAX_GAIN)
+            .clamp(0.0, MAX_GAIN);
+        let breath_amt = blend(
+            advanced_targets.breath_control,
+            macro_targets.breath_control,
+        )
+        .clamp(0.0, 1.0);
 
         // Apply spectral control slew limiting (prevents warble/artifacts)
+        let speech_loss_db = 0.0;
         let limited = self.control_limiters.process(
             raw_noise,
-            clarity_amt_pre_limit,
+            raw_clarity,
             raw_de_ess,
             raw_reverb,
             raw_prox,
             whisper,
             noisy,
+            speech_loss_db,
         );
 
-        let noise_amt = limited.denoise;
-        let clarity_amt = limited.clarity;
+        // --- Layer 2: Safeguard Interventions ---
+        self.meters
+            .speech_band_loss_db
+            .store(speech_loss_db, Ordering::Relaxed);
+        self.meters.speech_protection_active.store(
+            if limited.speech_protection_active {
+                1
+            } else {
+                0
+            },
+            Ordering::Relaxed,
+        );
+        self.meters
+            .speech_protection_scale
+            .store(limited.speech_protection_scale, Ordering::Relaxed);
+        self.meters.energy_budget_active.store(
+            if limited.energy_budget_active { 1 } else { 0 },
+            Ordering::Relaxed,
+        );
+        self.meters
+            .energy_budget_scale
+            .store(limited.energy_budget_scale, Ordering::Relaxed);
+
+        let mut noise_amt = limited.denoise;
+        let mut clarity_amt = limited.clarity;
         let de_ess_amt = limited.deesser;
-        let reverb_amt = limited.reverb;
+        let mut reverb_amt = limited.reverb;
         let prox_amt = limited.proximity;
+
+        // Inter-module safety clamps (DSP stability)
+        // Prevent destructive parameter interactions
+
+        // Rule 1: Reduce clarity when proximity is active (avoid thinning bass-boosted signal)
+        if prox_amt > 0.4 {
+            clarity_amt *= 0.7;
+        }
+
+        // Rule 2: Reduce deverb when proximity or clarity are high (avoid over-processing)
+        if prox_amt > 0.6 || clarity_amt > 0.6 {
+            reverb_amt *= 0.75;
+        }
+
+        // Rule 3: Reduce denoise when clarity is very high (avoid thinning)
+        if clarity_amt > 0.8 {
+            noise_amt *= 0.85;
+        }
 
         let output_gain_db = self.params.output_gain.value();
         let output_gain_lin = 10.0f32.powf(output_gain_db / 20.0);
 
-        // Per-effect preview mode (radio button behavior - only one can be active)
-        let preview_mode = if macro_mode {
-            0 // Preview is advanced-only
-        } else {
-            let preview_denoise = self.params.preview_denoise.value();
-            let preview_deverb = self.params.preview_deverb.value();
-            let preview_deesser = self.params.preview_deesser.value();
-            if preview_denoise {
-                1 // Denoise preview
-            } else if preview_deverb {
-                2 // Deverb preview
-            } else if preview_deesser {
-                3 // De-esser preview
-            } else {
-                0 // No preview
-            }
-        };
+        // --- Layer 1: Resolved Parameters (Post-Macro, Pre-Safeguard) ---
+        // These are the values the engine *attempts* to apply before any safeguards
+        self.meters
+            .noise_reduction_resolved
+            .store(raw_noise, Ordering::Relaxed);
+        self.meters
+            .deverb_resolved
+            .store(raw_reverb, Ordering::Relaxed);
+        self.meters
+            .clarity_resolved
+            .store(raw_clarity, Ordering::Relaxed);
+        self.meters
+            .deesser_resolved
+            .store(raw_de_ess, Ordering::Relaxed);
+        self.meters
+            .proximity_resolved
+            .store(raw_prox, Ordering::Relaxed);
+        self.meters
+            .leveler_resolved
+            .store(level_amt, Ordering::Relaxed);
+        self.meters
+            .breath_reduction_resolved
+            .store(breath_amt, Ordering::Relaxed);
+        self.meters
+            .noise_tone_resolved
+            .store(noise_tone, Ordering::Relaxed);
+
+        // --- NEW: Loudness Compensation Logic ---
+        // Target preservation of pre-processing RMS within ±2 dB (Always on)
+        // Slow smoothing for gain compensation (approx 2 second time constant)
+        let rms_alpha = 1.0 - (-1.0 / (2.0 * self.sample_rate)).exp();
+        // Removed unused energy tracking variables
 
         let bypass_restoration =
             self.process_l.bypass_restoration || self.process_r.bypass_restoration;
@@ -697,13 +979,16 @@ impl Plugin for VoiceStudioPlugin {
         let total_deverb = (reverb_amt - prox_reduction).clamp(0.0, 1.0);
 
         // Configs
+        let noise_mode_dtln = self.params.noise_mode.value() == presets::NoiseMode::Aggressive;
+        let use_dtln = self.params.use_dtln.value() || noise_mode_dtln;
+
         let denoise_cfg = DenoiseConfig {
             amount: noise_amt,
             sensitivity: (0.2 + 0.8 * noise_amt).clamp(0.2, 1.0),
             tone: noise_tone,
             sample_rate: self.sample_rate,
-            use_ml: self.params.use_ml.value(),
-            use_dtln: self.params.use_dtln.value(),
+            use_dtln,
+            speech_confidence: 0.5, // Will be updated per-sample with actual sidechain value
         };
 
         // Peak decay rate: 13 dB/sec (typical for DAW meters)
@@ -720,10 +1005,6 @@ impl Plugin for VoiceStudioPlugin {
         let right = &mut right_slice[0];
         let frame_count = left.len().min(right.len());
 
-        let mut restoration_delta_energy = 0.0f32;
-        let mut max_deverb_cut_db = -100.0f32; // Initialize to very low value
-        let mut max_deesser_cut_db = -100.0f32; // Initialize to very low value
-
         for idx in 0..frame_count {
             let input_l = left[idx];
             let input_r = right[idx];
@@ -733,13 +1014,28 @@ impl Plugin for VoiceStudioPlugin {
             self.peak_input_l = self.peak_input_l.max(input_db_l);
             self.peak_input_r = self.peak_input_r.max(input_db_r);
 
-            // 0. INPUT PROFILE ANALYSIS (for data-driven calibration)
-            // INVARIANT: Only pre-DSP samples are analyzed here
-            // INVARIANT: This feeds condition detection and macro calibration
-            self.input_profile_analyzer.process(input_l, input_r);
+            // 0a. SPEECH HPF (Hidden hygiene)
+            // Removes subsonic energy before any analysis or processing
+            let (hpf_l, hpf_r) = self.speech_hpf.process(input_l, input_r);
 
-            // 0b. SPEECH CONFIDENCE (sidechain analysis - no audio modification)
-            let sidechain = self.speech_confidence.process(input_l, input_r);
+            // 0b. ENVELOPE TRACKING (Unified Source of Truth)
+            // Tracks hygiene-filtered input dynamics before any processing
+            let env_l = self.process_l.envelope_tracker.process_sample(hpf_l);
+            let env_r = self.process_r.envelope_tracker.process_sample(hpf_r);
+
+            // 0c. INPUT PROFILE ANALYSIS (for data-driven calibration)
+            // INVARIANT: Only pre-restoration samples are analyzed here
+            // INVARIANT: This feeds condition detection and macro calibration
+            self.input_profile_analyzer.process(hpf_l, hpf_r);
+
+            // 0d. SPEECH CONFIDENCE (sidechain analysis - no audio modification)
+            let sidechain = self.speech_confidence.process(hpf_l, hpf_r);
+
+            // Track pre-processed speech band energy - Removed unused calculation
+
+            // Update pre-processing RMS envelope for loudness compensation
+            let pre_rms = (hpf_l * hpf_l + hpf_r * hpf_r) * 0.5;
+            self.pre_rms_env += (pre_rms - self.pre_rms_env) * rms_alpha;
 
             // Periodically maintain stability to prevent long-term drift
             // Call every ~1000 samples to prevent numerical drift over long sessions
@@ -752,13 +1048,13 @@ impl Plugin for VoiceStudioPlugin {
             let early_reflection_amt = (reverb_amt * 0.5).clamp(0.0, 1.0);
 
             let (pre_l, pre_r) = if bypass_restoration || early_reflection_amt < 0.001 {
-                (input_l, input_r)
+                (hpf_l, hpf_r)
             } else {
                 (
                     self.early_reflection_l
-                        .process(input_l, early_reflection_amt, &sidechain),
+                        .process(hpf_l, early_reflection_amt, &sidechain),
                     self.early_reflection_r
-                        .process(input_r, early_reflection_amt, &sidechain),
+                        .process(hpf_r, early_reflection_amt, &sidechain),
                 )
             };
 
@@ -770,25 +1066,55 @@ impl Plugin for VoiceStudioPlugin {
                 (pre_l, pre_r)
             } else {
                 self.speech_expander
-                    .process(pre_l, pre_r, expander_amt, &sidechain)
+                    .process(pre_l, pre_r, expander_amt, &sidechain, &env_l, &env_r)
+            };
+
+            // 3. PINK REFERENCE BIAS (Hidden Spectral Tonal Conditioning)
+            // Gently nudges speech towards -3dB/oct tilt to improve stability.
+            // Gated by speech confidence, bypassed if restoration disabled.
+            let (bias_l, bias_r) = if bypass_restoration {
+                (exp_l, exp_r)
+            } else {
+                self.pink_ref_bias.process(
+                    exp_l,
+                    exp_r,
+                    sidechain.speech_conf,
+                    prox_amt,
+                    de_ess_amt,
+                )
             };
 
             // A. RESTORATION STAGE (denoise, de-verb)
             let (s1_l, s1_r) = if bypass_restoration {
-                (exp_l, exp_r)
+                (bias_l, bias_r)
             } else {
-                self.denoiser.process_sample(exp_l, exp_r, &denoise_cfg)
+                // Update config with per-sample speech confidence
+                let mut cfg = denoise_cfg;
+                cfg.speech_confidence = sidechain.speech_conf;
+                self.denoiser.process_sample(bias_l, bias_r, &cfg)
             };
 
+            // 4. PLOSIVE SOFTENER (after denoise, before breath)
+            let s1b_l = self.plosive_softener_l.process(s1_l);
+            let s1b_r = self.plosive_softener_r.process(s1_r);
+
+            // 5. BREATH REDUCER (after plosive, before deverb)
+            let s1c_l = self
+                .breath_reducer_l
+                .process(s1b_l, breath_amt, &sidechain, &env_l);
+            let s1c_r = self
+                .breath_reducer_r
+                .process(s1b_r, breath_amt, &sidechain, &env_r);
+
             let s2_l = if bypass_restoration {
-                s1_l
+                s1c_l
             } else {
-                self.process_l.restoration_chain.safety_hpf.process(s1_l)
+                self.process_l.restoration_chain.safety_hpf.process(s1c_l)
             };
             let s2_r = if bypass_restoration {
-                s1_r
+                s1c_r
             } else {
-                self.process_r.restoration_chain.safety_hpf.process(s1_r)
+                self.process_r.restoration_chain.safety_hpf.process(s1c_r)
             };
             let s3_l = if bypass_restoration {
                 s2_l
@@ -797,6 +1123,9 @@ impl Plugin for VoiceStudioPlugin {
                     s2_l,
                     total_deverb,
                     self.sample_rate,
+                    sidechain.speech_conf,
+                    clarity_amt,
+                    prox_amt,
                 )
             };
             let s3_r = if bypass_restoration {
@@ -806,109 +1135,32 @@ impl Plugin for VoiceStudioPlugin {
                     s2_r,
                     total_deverb,
                     self.sample_rate,
+                    sidechain.speech_conf,
+                    clarity_amt,
+                    prox_amt,
                 )
             };
 
-            // Preview reference uses exp_l/exp_r (after early reflection + expander)
-            // This ensures we capture ONLY what denoise removes, not earlier stages
-            let denoise_ref_l = self
-                .process_l
-                .restoration_chain
-                .preview_delay_denoise
-                .push(exp_l);
-            let denoise_ref_r = self
-                .process_r
-                .restoration_chain
-                .preview_delay_denoise
-                .push(exp_r);
-            let deverb_ref_l = self
-                .process_l
-                .restoration_chain
-                .preview_delay_deverb
-                .push(s2_l);
-            let deverb_ref_r = self
-                .process_r
-                .restoration_chain
-                .preview_delay_deverb
-                .push(s2_r);
-            let denoise_cut_raw_l = if bypass_restoration {
-                0.0
-            } else if noise_amt > 0.001 {
-                denoise_ref_l - s1_l
-            } else {
-                0.0
-            };
-            let denoise_cut_raw_r = if bypass_restoration {
-                0.0
-            } else if noise_amt > 0.001 {
-                denoise_ref_r - s1_r
-            } else {
-                0.0
-            };
-            // Restoration delta is constructed so (restoration_output + delta) reconstructs
-            // the time-aligned restoration input within float tolerance.
-            let safety_cut_l = if bypass_restoration { 0.0 } else { s1_l - s2_l };
-            let safety_cut_r = if bypass_restoration { 0.0 } else { s1_r - s2_r };
-            let pre_deverb_delta_l = denoise_cut_raw_l + safety_cut_l;
-            let pre_deverb_delta_r = denoise_cut_raw_r + safety_cut_r;
-            let pre_deverb_delta_aligned_l = self
-                .process_l
-                .restoration_chain
-                .preview_delay_post_deverb
-                .push(pre_deverb_delta_l);
-            let pre_deverb_delta_aligned_r = self
-                .process_r
-                .restoration_chain
-                .preview_delay_post_deverb
-                .push(pre_deverb_delta_r);
-            let deverb_cut_l = if bypass_restoration {
-                0.0
-            } else if total_deverb > 0.001 {
-                deverb_ref_l - s3_l
-            } else {
-                0.0
-            };
-            let deverb_cut_r = if bypass_restoration {
-                0.0
-            } else if total_deverb > 0.001 {
-                deverb_ref_r - s3_r
-            } else {
-                0.0
-            };
-            let restoration_delta_l = if bypass_restoration {
-                0.0
-            } else if total_deverb > 0.001 {
-                pre_deverb_delta_aligned_l + deverb_cut_l
-            } else {
-                pre_deverb_delta_l
-            };
-            let restoration_delta_r = if bypass_restoration {
-                0.0
-            } else if total_deverb > 0.001 {
-                pre_deverb_delta_aligned_r + deverb_cut_r
-            } else {
-                pre_deverb_delta_r
-            };
-            restoration_delta_energy += 0.5
-                * (restoration_delta_l * restoration_delta_l
-                    + restoration_delta_r * restoration_delta_r);
-
             // B. SHAPING STAGE (proximity, clarity)
-            // Note: Proximity and clarity interact - proximity affects the frequency response
-            // that clarity operates on, so order matters. Proximity comes first as it's a
-            // more fundamental spatial characteristic.
+            // Proximity: adds low-end warmth (100-300Hz boost) for close-mic effect
+            // Clarity: reduces low-mid mud (120-380Hz cut) for cleaner sound
+            // These effects are now independent - order is proximity first, then clarity
             let (s4_l, s4_r) = if bypass_shaping {
                 (s3_l, s3_r)
             } else {
                 (
-                    self.process_l
-                        .shaping_chain
-                        .proximity
-                        .process(s3_l, prox_amt),
-                    self.process_r
-                        .shaping_chain
-                        .proximity
-                        .process(s3_r, prox_amt),
+                    self.process_l.shaping_chain.proximity.process(
+                        s3_l,
+                        prox_amt,
+                        sidechain.speech_conf,
+                        clarity_amt,
+                    ),
+                    self.process_r.shaping_chain.proximity.process(
+                        s3_r,
+                        prox_amt,
+                        sidechain.speech_conf,
+                        clarity_amt,
+                    ),
                 )
             };
 
@@ -924,13 +1176,13 @@ impl Plugin for VoiceStudioPlugin {
                     self.process_l.shaping_chain.clarity.process(
                         s4_l,
                         clarity_amt,
-                        prox_amt,
+                        sidechain.speech_conf,
                         clarity_drive,
                     ),
                     self.process_r.shaping_chain.clarity.process(
                         s4_r,
                         clarity_amt,
-                        prox_amt,
+                        sidechain.speech_conf,
                         clarity_drive,
                     ),
                 )
@@ -940,11 +1192,12 @@ impl Plugin for VoiceStudioPlugin {
             self.de_ess_rms_sq_r += (s5_r * s5_r - self.de_ess_rms_sq_r) * de_ess_alpha;
 
             // C. DYNAMICS STAGE (de-esser, leveler, limiter)
-            // De-esser with delta capture for preview
-            let (s6_l, s6_r, deesser_cut_l, deesser_cut_r) = if bypass_dynamics {
-                (s5_l, s5_r, 0.0, 0.0)
+            let (s6_l, s6_r) = if bypass_dynamics {
+                (s5_l, s5_r)
             } else {
-                let de_ess_gain = self.linked_de_esser.compute_gain(s5_l, s5_r, de_ess_amt);
+                let de_ess_gain = self
+                    .linked_de_esser
+                    .compute_gain(s5_l, s5_r, de_ess_amt, &env_l, &env_r);
                 let out_l = self
                     .process_l
                     .dynamics_chain
@@ -955,18 +1208,7 @@ impl Plugin for VoiceStudioPlugin {
                     .dynamics_chain
                     .de_esser_band
                     .apply(s5_r, de_ess_gain);
-                // Capture what de-esser removes (subtractive delta)
-                let cut_l = if de_ess_amt > 0.001 {
-                    s5_l - out_l
-                } else {
-                    0.0
-                };
-                let cut_r = if de_ess_amt > 0.001 {
-                    s5_r - out_r
-                } else {
-                    0.0
-                };
-                (out_l, out_r, cut_l, cut_r)
+                (out_l, out_r)
             };
 
             // Control interaction safeguard: Apply leveler gain with consideration of de-esser activity
@@ -979,7 +1221,7 @@ impl Plugin for VoiceStudioPlugin {
                     let input_power = (s5_l * s5_l + s5_r * s5_r) * 0.5;
                     let output_power = (s6_l * s6_l + s6_r * s6_r) * 0.5;
                     if output_power > 0.0 && input_power > 0.0 {
-                        10.0 * (output_power / input_power).log10()
+                        10.0f32 * (output_power / input_power as f32).log10()
                     } else {
                         0.0
                     }
@@ -988,20 +1230,30 @@ impl Plugin for VoiceStudioPlugin {
                 };
 
                 // Adjust leveler behavior based on de-esser activity to prevent interaction
-                let adjusted_level_amt = if de_ess_reduction_db < -3.0 { // Strong de-esser activity
+                let adjusted_level_amt = if de_ess_reduction_db < -3.0 {
+                    // Strong de-esser activity
                     level_amt * 0.7 // Reduce leveler aggression to prevent fight
                 } else {
                     level_amt
                 };
 
-                let leveler_gain = self.linked_compressor.compute_gain(s6_l, s6_r, adjusted_level_amt);
+                let leveler_gain = self.linked_compressor.compute_gain(
+                    &env_l,
+                    &env_r,
+                    adjusted_level_amt,
+                    sidechain.speech_conf,
+                    prox_amt,
+                    clarity_amt,
+                );
                 (s6_l * leveler_gain, s6_r * leveler_gain)
             };
 
             // D. SPECTRAL GUARDRAILS (safety layer before limiter)
             // Prevents extreme settings from breaking sound
             // Note: Applied after leveler to ensure gain reduction doesn't exceed limiter threshold
-            let (s7g_l, s7g_r) = self.spectral_guardrails.process(s7_l, s7_r, macro_mode);
+            let (s7g_l, s7g_r) =
+                self.spectral_guardrails
+                    .process(s7_l, s7_r, true, sidechain.speech_conf);
 
             let (s8_l, s8_r) = if bypass_dynamics {
                 (s7g_l, s7g_r)
@@ -1014,26 +1266,48 @@ impl Plugin for VoiceStudioPlugin {
             let s9_l = s8_l * output_gain_lin;
             let s9_r = s8_r * output_gain_lin;
 
-            // Per-effect preview output
-            // preview_mode: 0=none, 1=denoise, 2=deverb, 3=de-esser
-            let (out_l, out_r) = match preview_mode {
-                1 => {
-                    // Denoise preview: hear only what denoise removes
-                    (denoise_cut_raw_l, denoise_cut_raw_r)
-                }
-                2 => {
-                    // Deverb preview: hear only what deverb removes
-                    (deverb_cut_l, deverb_cut_r)
-                }
-                3 => {
-                    // De-esser preview: hear only what de-esser removes
-                    (deesser_cut_l, deesser_cut_r)
-                }
-                _ => {
-                    // Normal output
-                    (s9_l, s9_r)
-                }
+            // Track post-processed speech band energy - Removed unused calculation
+
+            // Update post-processing RMS envelope
+            let post_rms = (s9_l * s9_l + s9_r * s9_r) * 0.5;
+            self.post_rms_env += (post_rms - self.post_rms_env) * rms_alpha;
+
+            // Apply loudness compensation gain (Always on)
+            let comp_out_l = s9_l * self.loudness_comp_gain;
+            let comp_out_r = s9_r * self.loudness_comp_gain;
+
+            let idx2 = idx * 2;
+            if idx2 + 1 < self.preset_interleaved.len() {
+                self.preset_interleaved[idx2] = comp_out_l;
+                self.preset_interleaved[idx2 + 1] = comp_out_r;
+            }
+
+            // F. FINAL OUTPUT PRESETS (loudness normalization and true-peak limiting)
+            let preset = self.params.final_output_preset.value();
+            let (out_l, out_r) = if preset == presets::OutputPreset::None {
+                (comp_out_l, comp_out_r)
+            } else {
+                (
+                    comp_out_l * self.preset_gain_lin,
+                    comp_out_r * self.preset_gain_lin,
+                )
             };
+
+            let mut out_l = out_l;
+            let mut out_r = out_r;
+            if !out_l.is_finite() || !out_r.is_finite() {
+                out_l = 0.0;
+                out_r = 0.0;
+                self.pre_rms_env = 0.0;
+                self.post_rms_env = 0.0;
+                self.loudness_comp_gain = 1.0;
+            }
+            let abs_peak = out_l.abs().max(out_r.abs());
+            if abs_peak > 4.0 {
+                let scale = 4.0 / abs_peak;
+                out_l *= scale;
+                out_r *= scale;
+            }
 
             let output_db_l = 20.0 * out_l.abs().max(1e-6).log10();
             let output_db_r = 20.0 * out_r.abs().max(1e-6).log10();
@@ -1050,6 +1324,68 @@ impl Plugin for VoiceStudioPlugin {
         }
 
         // =====================================================================
+        // PRESET LOUDNESS + TRUE-PEAK UPDATE (end of buffer)
+        // =====================================================================
+        let preset = self.params.final_output_preset.value();
+        if preset != self.last_output_preset {
+            self.loudness_meter =
+                EbuR128::new(2, self.sample_rate as u32, Mode::I | Mode::TRUE_PEAK).ok();
+            self.preset_gain_db = 0.0;
+            self.preset_gain_lin = 1.0;
+            self.last_output_preset = preset;
+        }
+
+        if let Some(meter) = self.loudness_meter.as_mut() {
+            let frames = frame_count as usize;
+            let needed = frames.saturating_mul(2);
+            if needed <= self.preset_interleaved.len() {
+                let _ = meter.add_frames_f32(&self.preset_interleaved[..needed]);
+            }
+        }
+
+        if preset != presets::OutputPreset::None {
+            if let Some(meter) = self.loudness_meter.as_mut() {
+                let lufs = meter.loudness_global().ok();
+                let tp_l = meter.true_peak(0).ok();
+                let tp_r = meter.true_peak(1).ok();
+                let true_peak_db = match (tp_l, tp_r) {
+                    (Some(a), Some(b)) => a.max(b) as f32,
+                    (Some(a), None) => a as f32,
+                    (None, Some(b)) => b as f32,
+                    _ => -120.0,
+                };
+
+                let lufs_target = self.preset_manager.get_lufs_target(preset).unwrap_or(0.0);
+                let peak_ceiling = self
+                    .preset_manager
+                    .get_true_peak_ceiling(preset)
+                    .unwrap_or(0.0);
+
+                let mut target_gain_db = if let Some(current) = lufs {
+                    (lufs_target - current as f32).clamp(-24.0, 24.0)
+                } else {
+                    0.0
+                };
+
+                let tp_limit_db = peak_ceiling - true_peak_db;
+                if tp_limit_db.is_finite() {
+                    target_gain_db = target_gain_db.min(tp_limit_db);
+                }
+
+                const PRESET_GAIN_TAU_SEC: f32 = 0.5;
+                let frames = frame_count as f32;
+                if frames > 0.0 {
+                    let alpha = 1.0 - (-frames / (PRESET_GAIN_TAU_SEC * self.sample_rate)).exp();
+                    self.preset_gain_db += (target_gain_db - self.preset_gain_db) * alpha;
+                    self.preset_gain_lin = 10.0_f32.powf(self.preset_gain_db / 20.0);
+                }
+            }
+        } else {
+            self.preset_gain_db = 0.0;
+            self.preset_gain_lin = 1.0;
+        }
+
+        // =====================================================================
         // DATA-DRIVEN CALIBRATION UPDATE (end of buffer)
         // =====================================================================
         // INVARIANT: InputProfile computed ONCE, pre-DSP
@@ -1063,13 +1399,69 @@ impl Plugin for VoiceStudioPlugin {
 
         // Finalize output profile analysis (for validation/debugging only)
         self.output_profile_analyzer.finalize_frame();
-        let _output_profile = self.output_profile_analyzer.get_profile();
+        let output_profile = self.output_profile_analyzer.get_profile();
 
-        // Update macro controller with INPUT profile for calibration
-        // INVARIANT: Control decisions come ONLY from input profile
-        if macro_mode {
-            self.macro_controller.update_input_profile(input_profile);
+        // --- Layer 3: Audible Outcome Metrics ---
+        let output_rms_db = if output_profile.rms > 1e-8 {
+            20.0 * output_profile.rms.log10()
+        } else {
+            -80.0
+        };
+        let output_peak_db = if output_profile.peak > 1e-8 {
+            20.0 * output_profile.peak.log10()
+        } else {
+            -80.0
+        };
+        let total_gr_db = self.linked_compressor.get_gain_reduction_db()
+            + self.linked_limiter.get_gain_reduction_db();
+
+        self.meters
+            .output_rms_db
+            .store(output_rms_db, Ordering::Relaxed);
+        self.meters
+            .output_peak_db
+            .store(output_peak_db, Ordering::Relaxed);
+        self.meters
+            .output_crest_db
+            .store(output_profile.crest_factor_db, Ordering::Relaxed);
+        self.meters
+            .total_gain_reduction_db
+            .store(total_gr_db, Ordering::Relaxed);
+
+        // Update loudness compensation gain based on RMS envelopes (Always on)
+        if self.post_rms_env > 1e-8 && self.pre_rms_env > 1e-8 {
+            let current_ratio = (self.pre_rms_env / self.post_rms_env).sqrt();
+            // Target preservation within ±2 dB (linear 0.79 to 1.26)
+            // Limit compensation to max 6 dB boost to prevent noise floor explosion
+            let target_gain = current_ratio.clamp(1.0, 2.0);
+
+            // Slowly slew the compensation gain
+            self.loudness_comp_gain += (target_gain - self.loudness_comp_gain) * rms_alpha;
+        } else {
+            self.loudness_comp_gain += (1.0 - self.loudness_comp_gain) * rms_alpha;
         }
+
+        let loudness_error_db = if self.post_rms_env > 1e-8 && self.pre_rms_env > 1e-8 {
+            10.0 * (self.pre_rms_env / self.post_rms_env).log10()
+        } else {
+            0.0
+        };
+        let loudness_comp_db = if self.loudness_comp_gain > 1e-8 {
+            20.0 * self.loudness_comp_gain.log10()
+        } else {
+            0.0
+        };
+        let loudness_active = loudness_comp_db.abs() > 0.1;
+
+        self.meters
+            .loudness_error_db
+            .store(loudness_error_db, Ordering::Relaxed);
+        self.meters
+            .loudness_comp_db
+            .store(loudness_comp_db, Ordering::Relaxed);
+        self.meters
+            .loudness_active
+            .store(if loudness_active { 1 } else { 0 }, Ordering::Relaxed);
 
         // Update DSP modules with profile-based adaptation
         // METRIC OWNERSHIP: Leveler owns RMS, crest factor, RMS variance
@@ -1082,31 +1474,14 @@ impl Plugin for VoiceStudioPlugin {
         self.peak_output_l = (self.peak_output_l - decay).max(-80.0);
         self.peak_output_r = (self.peak_output_r - decay).max(-80.0);
 
-        let frame_count_f = frame_count.max(1) as f32;
-        let restoration_rms = (restoration_delta_energy / frame_count_f).sqrt();
-        let restoration_rms_db = 20.0 * (restoration_rms + 1e-8).log10();
-        let delta_activity = if restoration_rms_db < -60.0 {
-            0.0
-        } else if restoration_rms_db < -30.0 {
-            1.0
-        } else {
-            2.0
-        };
-
         // Update meter values atomically (done once per buffer for efficiency)
         self.meters.set_input_peak_l(self.peak_input_l);
         self.meters.set_input_peak_r(self.peak_input_r);
         self.meters.set_output_peak_l(self.peak_output_l);
         self.meters.set_output_peak_r(self.peak_output_r);
-        self.meters.set_restoration_delta_rms_db(restoration_rms_db);
-        self.meters.set_delta_activity(delta_activity);
 
         // Get gain reduction from both channel compressors for true stereo metering
-        let gr_db = if preview_mode != 0 {
-            0.0 // Don't show gain reduction when previewing cuts
-        } else {
-            self.linked_compressor.get_gain_reduction_db()
-        };
+        let gr_db = self.linked_compressor.get_gain_reduction_db();
         self.meters.set_gain_reduction_l(gr_db);
         self.meters.set_gain_reduction_r(gr_db);
 
@@ -1125,8 +1500,8 @@ impl Plugin for VoiceStudioPlugin {
             .set_debug_deesser_gr_db(self.linked_de_esser.get_gain_reduction_db());
 
         // Limiter gain reduction
-        self.meters
-            .set_debug_limiter_gr_db(self.linked_limiter.get_gain_reduction_db());
+        let limiter_gr_db = self.linked_limiter.get_gain_reduction_db();
+        self.meters.set_debug_limiter_gr_db(limiter_gr_db);
 
         // Early reflection suppression (average of L/R)
         let early_refl_avg = 0.5
@@ -1144,38 +1519,166 @@ impl Plugin for VoiceStudioPlugin {
         self.meters
             .set_debug_expander_atten_db(self.speech_expander.get_gain_reduction_db());
 
+        // Detect sudden loudness compensation + limiter movement ("pumping")
+        let prev_gain = self.prev_loudness_comp_gain.max(1e-6);
+        let loudness_ratio = (self.loudness_comp_gain / prev_gain).max(1e-6);
+        let loudness_delta_db = 20.0 * loudness_ratio.log10();
+        let pump_trigger = loudness_delta_db.abs() > LOUDNESS_PUMP_DELTA_DB
+            || limiter_gr_db > LIMITER_PUMP_THRESHOLD_DB;
+
+        if pump_trigger && self.pump_log_cooldown == 0 {
+            let macro_dist = self.params.macro_distance.value();
+            let macro_clar = self.params.macro_clarity.value();
+            let macro_cons = self.params.macro_consistency.value();
+            let pump_mode = if macro_mode { "SIMPLE" } else { "ADVANCED" };
+            vs_log!(
+                "[PUMP DETECT] limiter={:.2}dB loudness_delta={:.2}dB comp_db={:.2}dB err_db={:.2}dB speech_conf={:.2} mode={} macros={:.2}/{:.2}/{:.2} noise_mode={:?} use_dtln={} noise={:.2} reverb={:.2} clarity={:.2} level={:.2} breath={:.2}",
+                limiter_gr_db,
+                loudness_delta_db,
+                loudness_comp_db,
+                loudness_error_db,
+                last_sidechain.speech_conf,
+                pump_mode,
+                macro_dist,
+                macro_clar,
+                macro_cons,
+                self.params.noise_mode.value(),
+                self.params.use_dtln.value(),
+                noise_amt,
+                reverb_amt,
+                clarity_amt,
+                level_amt,
+                breath_amt,
+            );
+            self.pump_log_cooldown = PUMP_LOG_COOLDOWN_BUFFERS;
+        }
+
+        if self.pump_log_cooldown > 0 {
+            self.pump_log_cooldown -= 1;
+        }
+        self.prev_loudness_comp_gain = self.loudness_comp_gain;
+
         // =====================================================================
-        // DEBUG LOGGING - rate-limited to ~1 Hz, writes to /tmp/voice_studio.log
+        // DEBUG LOGGING - rate-limited to ~1 Hz
         // =====================================================================
-        self.debug_log_counter += 1;
-        // Log every ~50 buffers (roughly 1 Hz at 48kHz with 1024-sample buffers)
-        if self.debug_log_counter >= 50 {
-            self.debug_log_counter = 0;
-            // Write directly to log file (no env var needed)
-            if let Ok(mut file) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/voice_studio.log")
-            {
-                use std::io::Write;
-                let _ = writeln!(
-                    file,
-                    "[DSP] mode={} ml={} | noise={:.2} deverb={:.2} prox={:.2} deess={:.2} level={:.2} | \
-                     speech={:.2} | denoise_delta={:.1}dB deverb_max_cut={:.1}dB deess_max_cut={:.1}dB deess_gr={:.1}dB limit_gr={:.1}dB",
-                    if macro_mode { "SIMPLE" } else { "ADVANCED" },
-                    self.params.use_ml.value(),
-                    noise_amt,
-                    total_deverb,
-                    prox_amt,
-                    de_ess_amt,
-                    level_amt,
-                    last_sidechain.speech_conf,
-                    self.meters.get_restoration_delta_rms_db(),
-                    max_deverb_cut_db, // Max deverb cut in dB
-                    max_deesser_cut_db, // Max de-esser cut in dB
-                    self.linked_de_esser.get_gain_reduction_db(),
-                    self.linked_limiter.get_gain_reduction_db(),
+        #[cfg(feature = "debug")]
+        {
+            let m = &self.meters;
+            let p = &self.params;
+            self.debug_log_counter += 1;
+            if self.debug_log_counter >= 50 {
+                self.debug_log_counter = 0;
+
+                // Layer 0: Intent
+                let mode = if macro_mode { "SIMPLE" } else { "ADVANCED" };
+                let ml_enabled = p.use_ml.value();
+                let dtln_enabled = p.use_dtln.value();
+                let noise_mode_value = p.noise_mode.value();
+                let macro_dist = p.macro_distance.value();
+                let macro_clar = p.macro_clarity.value();
+                let macro_cons = p.macro_consistency.value();
+                let speech_conf = m.get_debug_speech_confidence();
+
+                // Layer 1: Resolved Parameters
+                let nr_res = m.noise_reduction_resolved.load(Ordering::Relaxed);
+                let dr_res = m.deverb_resolved.load(Ordering::Relaxed);
+                let cl_res = m.clarity_resolved.load(Ordering::Relaxed);
+                let ds_res = m.deesser_resolved.load(Ordering::Relaxed);
+                let pr_res = m.proximity_resolved.load(Ordering::Relaxed);
+                let lv_res = m.leveler_resolved.load(Ordering::Relaxed);
+                let br_res = m.breath_reduction_resolved.load(Ordering::Relaxed);
+                let nt_res = m.noise_tone_resolved.load(Ordering::Relaxed);
+
+                // Layer 2: Safeguard Interventions
+                let lc_db = m.loudness_comp_db.load(Ordering::Relaxed);
+                let le_db = m.loudness_error_db.load(Ordering::Relaxed);
+                let lc_active = m.loudness_active.load(Ordering::Relaxed) == 1;
+                let sbl_db = m.speech_band_loss_db.load(Ordering::Relaxed);
+                let sp_active = m.speech_protection_active.load(Ordering::Relaxed) == 1;
+                let sp_scale = m.speech_protection_scale.load(Ordering::Relaxed);
+                let eb_active = m.energy_budget_active.load(Ordering::Relaxed) == 1;
+                let eb_scale = m.energy_budget_scale.load(Ordering::Relaxed);
+
+                // Layer 3: Audible Outcome Metrics
+                let out_rms_db = m.output_rms_db.load(Ordering::Relaxed);
+                let out_peak_db = m.output_peak_db.load(Ordering::Relaxed);
+                let out_crest_db = m.output_crest_db.load(Ordering::Relaxed);
+                let total_gr_db = m.total_gain_reduction_db.load(Ordering::Relaxed);
+
+                vs_log!(
+                    "--- Snapshot ---
+[L0_Intent] Mode: {} ML: {} Denoise: {} (noise_mode={:?} use_dtln={}) | Macro_Dist: {:.2} Macro_Clarity: {:.2} Macro_Consist: {:.2} | Speech_Conf: {:.2}
+[L1_Resolved] NR: {:.2} DeVerb: {:.2} Clarity: {:.2} DeEss: {:.2} Prox: {:.2} Level: {:.2} Breath: {:.2} Tone: {:.2}
+[L2_Safeguards] Loudness_Comp_dB: {:.2} (Err: {:.2} Active: {}) | Speech_Prot_dB: {:.2} (Active: {} Scale: {:.2}) | Energy_Budget_Active: {} (Scale: {:.2})
+[L3_Audible] RMS: {:.1}dB Peak: {:.1}dB Crest: {:.1}dB | Total_GR: {:.1}dB",
+                    mode,
+                    ml_enabled,
+                    if dtln_enabled { "DTLN" } else { "DSP" },
+                    noise_mode_value,
+                    dtln_enabled,
+                    macro_dist,
+                    macro_clar,
+                    macro_cons,
+                    speech_conf,
+                    nr_res,
+                    dr_res,
+                    cl_res,
+                    ds_res,
+                    pr_res,
+                    lv_res,
+                    br_res,
+                    nt_res,
+                    lc_db,
+                    le_db,
+                    lc_active,
+                    sbl_db,
+                    sp_active,
+                    sp_scale,
+                    eb_active,
+                    eb_scale,
+                    out_rms_db,
+                    out_peak_db,
+                    out_crest_db,
+                    total_gr_db
                 );
+            }
+
+            // Layer 4: Mode Switch Integrity logging
+            const AUDIBLE_CHANGE_TOLERANCE_DB: f32 = 0.1; // 0.1 dB tolerance
+            let mode_trans_event = m.mode_transition_event.load(Ordering::Relaxed);
+            if mode_trans_event != 0 {
+                let current_rms = m.output_rms_db.load(Ordering::Relaxed);
+                let pre_switch_rms = m.pre_switch_audible_rms.load(Ordering::Relaxed);
+
+                let audible_change_detected =
+                    (current_rms - pre_switch_rms).abs() > AUDIBLE_CHANGE_TOLERANCE_DB;
+                m.audible_change_detected.store(
+                    if audible_change_detected { 1 } else { 0 },
+                    Ordering::Relaxed,
+                );
+
+                let transition_type = if mode_trans_event == 1 {
+                    "SIMPLE->ADVANCED"
+                } else {
+                    "ADVANCED->SIMPLE"
+                };
+                let hash_before = m.params_hash_before.load(Ordering::Relaxed);
+                let hash_after = m.params_hash_after.load(Ordering::Relaxed);
+                let audible_change_flag = m.audible_change_detected.load(Ordering::Relaxed) == 1; // Use a different var name to avoid confusion
+                vs_log!(
+                    "--- Mode Switch Event ---
+Transition: {}
+Params_Hash_Before: {}
+Params_Hash_After: {}
+Audible_Change_Detected: {}",
+                    transition_type,
+                    hash_before,
+                    hash_after,
+                    audible_change_flag
+                );
+                m.mode_transition_event.store(0, Ordering::Relaxed); // Clear event
+                m.audible_change_detected.store(0, Ordering::Relaxed); // Clear flag
+                m.pre_switch_audible_rms.store(-80.0, Ordering::Relaxed); // Reset
             }
         }
 
@@ -1184,7 +1687,7 @@ impl Plugin for VoiceStudioPlugin {
 }
 
 impl ClapPlugin for VoiceStudioPlugin {
-    const CLAP_ID: &'static str = "com.andrzej.voice-studio";
+    const CLAP_ID: &'static str = "com.andrzej.vxcleaner";
     const CLAP_DESCRIPTION: Option<&'static str> = Some("Vocal Restoration Suite");
     const CLAP_MANUAL_URL: Option<&'static str> = None;
     const CLAP_SUPPORT_URL: Option<&'static str> = None;

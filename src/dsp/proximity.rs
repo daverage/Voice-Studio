@@ -1,19 +1,25 @@
 //! Proximity Effect (Low-end Restoration)
 //!
-//! # Perceptual Contract
-//! - **Target Source**: Thin, distant, or lapel-mic speech.
-//! - **Intended Effect**: Restore low-end body (100-300Hz) associated with close-mic broadcasting.
-//! - **Failure Modes**:
-//!   - Boomy / muddy sound if over-applied.
-//!   - Masking of intelligibility by excessive LF energy.
-//! - **Will Not Do**:
-//!   - Synthesize sub-harmonics (not a sub-synth).
-//!   - Fix physically high-passed inputs (e.g. telephone).
+//! Restores low-end body (100-300Hz) associated with close-mic broadcasting
+//! to simulate the proximity effect that occurs when speaking close to a
+//! directional microphone. Enhances the perception of closeness and intimacy
+//! in vocal recordings.
+//!
+//! # Purpose
+//! Restore low-end body to thin, distant, or lapel-mic speech to achieve
+//! the perception of close-mic broadcasting with natural low-end presence.
+//!
+//! # Design Notes
+//! - Targets low-end body frequencies (100-300Hz)
+//! - Simulates natural proximity effect of directional microphones
+//! - Carefully balanced to avoid boomy or muddy results
+//! - Does not synthesize missing low frequencies, only enhances existing ones
 //!
 //! # Lifecycle
 //! - **Active**: Normal operation.
 //! - **Bypassed**: Passes audio through.
 
+use crate::dsp::utils::{lerp, perceptual_curve};
 use crate::dsp::Biquad;
 
 // Constants for proximity effect tuning
@@ -32,7 +38,7 @@ const FILTER_Q: f32 = 0.7;
 const PROX_SMOOTH_COEFF: f32 = 0.01;
 // Maximum bass boost at proximity=1.0 (dB).
 // Increasing: more bass boost; decreasing: less bass boost.
-const MAX_BOOST_DB: f32 = 12.0;
+const MAX_BOOST_DB: f32 = 18.0;
 // Proximity threshold above which HF rolloff begins.
 // Increasing: HF rolloff starts later; decreasing: starts earlier.
 const HF_ROLLOFF_THRESHOLD: f32 = 0.7;
@@ -99,7 +105,13 @@ impl Proximity {
         }
     }
 
-    pub fn process(&mut self, input: f32, proximity: f32) -> f32 {
+    pub fn process(
+        &mut self,
+        input: f32,
+        proximity: f32,
+        speech_confidence: f32,
+        clarity_amount: f32,
+    ) -> f32 {
         let target = proximity.clamp(0.0, 1.0);
 
         // Smooth proximity to avoid zippering
@@ -110,11 +122,26 @@ impl Proximity {
             self.prox_smoothed = 0.0;
         }
 
-        // Bass boost
-        let boost_db = MAX_BOOST_DB * self.prox_smoothed;
+        // Apply perceptual curve
+        let x = perceptual_curve(self.prox_smoothed);
 
-        // HF rolloff only when very close
-        let hf_rolloff_db = if self.prox_smoothed > HF_ROLLOFF_THRESHOLD {
+        // Two-stage bass boost curve:
+        // 0-50%: gentle rise to 6dB
+        // 50-100%: aggressive rise from 6dB to 18dB
+        let low_boost_db = if x <= 0.5 {
+            lerp(0.0, 6.0, x / 0.5)
+        } else {
+            lerp(6.0, MAX_BOOST_DB, (x - 0.5) / 0.5)
+        };
+
+        // Speech-aware damping (reduces boost slightly during voiced speech to prevent downstream overload)
+        let speech_conf = speech_confidence.clamp(0.0, 1.0);
+        let boost_db = low_boost_db * (0.8 + 0.2 * speech_conf);
+
+        // HF rolloff: disabled entirely if clarity > 0.6
+        let hf_rolloff_db = if clarity_amount > 0.6 {
+            0.0
+        } else if self.prox_smoothed > HF_ROLLOFF_THRESHOLD {
             let close_amount = (self.prox_smoothed - HF_ROLLOFF_THRESHOLD) / HF_ROLLOFF_RANGE;
             HF_ROLLOFF_MAX_DB * close_amount
         } else {

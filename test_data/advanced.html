@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VxCLEANER - Advanced Mode</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #0f172a; /* Slate 900 */
+            font-family: 'Roboto', sans-serif;
+            color: #e2e8f0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* --- ROOT CONTAINER --- */
+        .app-root {
+            width: 900px;
+            height: 550px;
+            background-color: #0f172a;
+            border: 1px solid #334155;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+        }
+
+        /* --- HEADER --- */
+        .header {
+            height: 68px;
+            background-color: #1e293b;
+            border-bottom: 1px solid #334155;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+
+        .header-left {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #ffffff;
+            margin: 0;
+        }
+
+        .header-sub {
+            font-size: 12px;
+            color: #94a3b8;
+            margin: 0;
+        }
+
+        /* Buttons */
+        button {
+            cursor: pointer;
+            font-family: 'Roboto', sans-serif;
+            border: none;
+            outline: none;
+        }
+
+        .mode-group {
+            display: flex;
+            gap: 4px;
+        }
+
+        .mode-btn {
+            height: 28px;
+            padding: 0 12px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            border-radius: 4px;
+            border: 1px solid #334155;
+        }
+
+        .mode-btn.inactive {
+            background-color: #0f172a;
+            color: #94a3b8;
+        }
+
+        .mode-btn.active {
+            background-color: #1d4ed8;
+            border-color: #3b82f6;
+            color: #ffffff;
+        }
+
+        /* --- MAIN VIEW --- */
+        .main-view {
+            flex: 1;
+            padding: 24px;
+            display: flex;
+            gap: 40px;
+        }
+
+        /* --- COLUMNS --- */
+        .column {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .column-header {
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            height: 24px;
+            margin-bottom: 16px;
+            display: block;
+        }
+
+        /* Specific Column Styles */
+        .col-levels {
+            width: 180px;
+            flex-shrink: 0;
+            border-right: 1px solid #1e293b;
+            padding-right: 20px;
+        }
+        .col-clean { flex: 1; min-width: 200px; color: #60a5fa; }
+        .col-polish { flex: 1; min-width: 200px; color: #60a5fa; }
+        .text-gray { color: #94a3b8; }
+        .text-orange { color: #f97316; }
+
+        /* --- METERS --- */
+        .meter-grid {
+            display: flex;
+            height: 260px;
+            gap: 6px;
+        }
+
+        .meter-col {
+            display: flex;
+            flex-direction: column;
+            width: 34px;
+            height: 100%;
+        }
+
+        .meter-label {
+            font-size: 10px;
+            color: #64748b;
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .meter-pair {
+            display: flex;
+            gap: 2px;
+            flex: 1;
+            justify-content: center;
+        }
+
+        .meter-track {
+            background-color: #0f172a;
+            border: 1px solid #334155;
+            position: relative;
+            background-image: repeating-linear-gradient(to bottom, transparent, transparent 5%, rgba(0,0,0,0.4) 5%, rgba(0,0,0,0.4) 5.5%);
+        }
+
+        .meter-fill {
+            position: absolute;
+            bottom: 0; left: 1px; right: 1px;
+        }
+
+        .fill-normal { background: linear-gradient(to top, #22c55e, #ef4444); }
+        .fill-gr { background: linear-gradient(to bottom, #ef4444, #f97316); }
+
+        /* Noise Floor LEDs */
+        .noise-floor-row {
+            margin-top: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .led-group {
+            display: flex;
+            gap: 6px;
+        }
+
+        .led {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 1px solid #0f172a;
+            box-shadow: inset 0 0 2px rgba(0,0,0,0.5);
+        }
+        .led-green { background-color: #22c55e; box-shadow: 0 0 6px #22c55e; }
+        .led-yellow { background-color: #713f12; }
+        .led-red { background-color: #7f1d1d; }
+
+        /* --- SLIDERS --- */
+        .slider-container {
+            height: 52px;
+            margin-bottom: 8px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .slider-header {
+            display: flex;
+            justify-content: space-between;
+            height: 20px;
+            margin-bottom: 2px;
+        }
+
+        .slider-label { font-size: 12px; color: #94a3b8; }
+        .slider-value { font-size: 12px; color: #f1f5f9; font-weight: bold; }
+
+        .slider-visual {
+            flex: 1;
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 3px;
+            position: relative;
+        }
+
+        .slider-bar {
+            position: absolute;
+            top: 0; left: 0; bottom: 0;
+            background-color: rgba(59, 130, 246, 0.7); /* Blue transparent */
+            border-radius: 2px;
+        }
+
+        /* Bipolar Slider Style */
+        .bipolar-center {
+            position: absolute;
+            left: 50%; top: 0; bottom: 0;
+            width: 1px;
+            background-color: rgba(255,255,255,0.2);
+        }
+
+        /* --- TOGGLE (MODE) --- */
+        .toggle-row {
+            height: 30px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+        }
+
+        .toggle-label {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-right: 12px;
+        }
+
+        .toggle-btn {
+            height: 26px;
+            width: 90px;
+            font-size: 11px;
+            background-color: #f97316; /* Orange Active */
+            border: 1px solid #fb923c;
+            color: white;
+            font-weight: bold;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* --- DROPDOWN --- */
+        .dropdown-row {
+            margin-top: auto; /* Push to bottom */
+            height: 32px;
+            display: flex;
+            align-items: center;
+        }
+
+        .dropdown-label {
+            font-size: 12px;
+            color: #94a3b8;
+            margin-right: 12px;
+        }
+
+        .dropdown-box {
+            width: 140px;
+            height: 28px;
+            background-color: #0f172a;
+            border: 1px solid #334155;
+            color: #ffffff;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            padding-left: 8px;
+            border-radius: 4px;
+        }
+
+        /* --- SPACER --- */
+        .spacer { height: 24px; }
+
+        /* --- FOOTER --- */
+        .footer {
+            height: 40px;
+            background-color: #0f172a;
+            border-top: 1px solid #1e293b;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+        }
+
+        .copyright-text {
+            font-size: 10px;
+            color: #64748b;
+            margin-right: auto;
+        }
+
+        .footer-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .footer-btn {
+            height: 28px;
+            padding: 0 12px;
+            font-size: 11px;
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            color: #cbd5e1;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+        }
+        .footer-btn:hover { background-color: #334155; }
+
+        .btn-reset {
+            background-color: #450a0a;
+            border-color: #991b1b;
+            color: #fecaca;
+        }
+        .btn-reset:hover { background-color: #7f1d1d; }
+
+    </style>
+</head>
+<body>
+
+    <div class="app-root">
+        <!-- HEADER -->
+        <div class="header">
+            <div class="header-left">
+                <p class="header-title">VxCLEANER</p>
+                <p class="header-sub">Vocal Restoration</p>
+            </div>
+            <div class="header-controls">
+                <div class="mode-group">
+                    <button class="mode-btn inactive">Simple</button>
+                    <button class="mode-btn active">Advanced</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MAIN VIEW -->
+        <div class="main-view">
+            
+            <!-- LEFT: LEVELS -->
+            <div class="column col-levels">
+                <span class="column-header text-gray">LEVELS</span>
+                
+                <div class="meter-grid">
+                    <!-- IN -->
+                    <div class="meter-col">
+                        <span class="meter-label">IN</span>
+                        <div class="meter-pair">
+                            <div class="meter-track" style="width: 12px;"><div class="meter-fill fill-normal" style="height: 60%;"></div></div>
+                            <div class="meter-track" style="width: 12px;"><div class="meter-fill fill-normal" style="height: 55%;"></div></div>
+                        </div>
+                    </div>
+                    <!-- GR -->
+                    <div class="meter-col">
+                        <span class="meter-label">GR</span>
+                        <div class="meter-track" style="width: 12px; margin: 0 auto;"><div class="meter-fill fill-gr" style="height: 10%; top:0; bottom: auto;"></div></div>
+                    </div>
+                    <!-- DELTA -->
+                    <div class="meter-col">
+                        <span class="meter-label">DELTA</span>
+                        <div class="meter-track" style="width: 12px; margin: 0 auto;"><div class="meter-fill fill-gr" style="height: 5%; top:0; bottom: auto;"></div></div>
+                    </div>
+                    <!-- OUT -->
+                    <div class="meter-col">
+                        <span class="meter-label">OUT</span>
+                        <div class="meter-pair">
+                            <div class="meter-track" style="width: 12px;"><div class="meter-fill fill-normal" style="height: 65%;"></div></div>
+                            <div class="meter-track" style="width: 12px;"><div class="meter-fill fill-normal" style="height: 65%;"></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NOISE FLOOR -->
+                <div class="noise-floor-row">
+                    <span class="meter-label" style="text-align: left; margin:0;">FLOOR</span>
+                    <div class="led-group">
+                        <div class="led led-green"></div> <!-- Active -->
+                        <div class="led led-yellow"></div> <!-- Inactive -->
+                        <div class="led led-red"></div>    <!-- Inactive -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- MIDDLE: CLEAN & REPAIR -->
+            <div class="column col-clean">
+                <span class="column-header">CLEAN & REPAIR</span>
+
+                <!-- Noise Reduction -->
+                <div class="slider-container">
+                    <div class="slider-header">
+                        <span class="slider-label">Noise Reduction</span>
+                        <span class="slider-value">45%</span>
+                    </div>
+                    <div class="slider-visual">
+                        <div class="slider-bar" style="width: 45%;"></div>
+                    </div>
+                </div>
+
+                <!-- Mode Toggle (Under Noise Red) -->
+                <div class="toggle-row">
+                    <span class="toggle-label">Mode</span>
+                    <button class="toggle-btn">Aggressive</button>
+                </div>
+
+                <!-- Tone (Bipolar) -->
+                <div class="slider-container">
+                    <div class="slider-header">
+                        <span class="slider-label">Tone</span>
+                        <span class="slider-value">Bright</span>
+                    </div>
+                    <div class="slider-visual">
+                        <div class="bipolar-center"></div>
+                        <div class="slider-bar" style="left: 50%; width: 20%;"></div>
+                    </div>
+                </div>
+
+                <!-- De-Verb -->
+                <div class="slider-container">
+                    <div class="slider-header">
+                        <span class="slider-label">De-Verb</span>
+                        <span class="slider-value">15%</span>
+                    </div>
+                    <div class="slider-visual">
+                        <div class="slider-bar" style="width: 15%;"></div>
+                    </div>
+                </div>
+
+                <!-- Clarity -->
+                <div class="slider-container">
+                    <div class="slider-header">
+                        <span class="slider-label">Clarity</span>
+                        <span class="slider-value">60%</span>
+                    </div>
+                    <div class="slider-visual">
+                        <div class="slider-bar" style="width: 60%;"></div>
+                    </div>
+                </div>
+
+                <!-- Breath Control -->
+                <div class="slider-container">
+                    <div class="slider-header">
+                        <span class="slider-label">Breath Control</span>
+                        <span class="slider-value">25%</span>
+                    </div>
+                    <div class="slider-visual">
+                        <div class="slider-bar" style="width: 25%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RIGHT: POLISH & ENHANCE -->
+            <div class="column col-polish">
+                <span class="column-header">POLISH & ENHANCE</span>
+
+                <!-- Proximity -->
+                <div class="slider-container">
+                    <div class="slider-header">
+                        <span class="slider-label">Proximity</span>
+                        <span class="slider-value">10%</span>
+                    </div>
+                    <div class="slider-visual">
+                        <div class="slider-bar" style="width: 10%;"></div>
+                    </div>
+                </div>
+
+                <!-- De-Ess -->
+                <div class="slider-container">
+                    <div class="slider-header">
+                        <span class="slider-label">De-Ess</span>
+                        <span class="slider-value">30%</span>
+                    </div>
+                    <div class="slider-visual">
+                        <div class="slider-bar" style="width: 30%;"></div>
+                    </div>
+                </div>
+
+                <!-- Leveler -->
+                <div class="slider-container">
+                    <div class="slider-header">
+                        <span class="slider-label">Leveler</span>
+                        <span class="slider-value">40%</span>
+                    </div>
+                    <div class="slider-visual">
+                        <div class="slider-bar" style="width: 40%;"></div>
+                    </div>
+                </div>
+
+                <div class="spacer"></div>
+
+                <!-- Output Section -->
+                <span class="column-header text-orange">OUTPUT</span>
+                <div class="slider-container">
+                    <div class="slider-header">
+                        <span class="slider-label">Gain</span>
+                        <span class="slider-value">0.0 dB</span>
+                    </div>
+                    <div class="slider-visual">
+                        <div class="slider-bar" style="width: 50%;"></div>
+                    </div>
+                </div>
+
+                <!-- Final Output Dropdown -->
+                <div class="dropdown-row">
+                    <span class="dropdown-label">FINAL OUTPUT</span>
+                    <div class="dropdown-box">Podcast</div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- FOOTER -->
+        <div class="footer">
+            <span class="copyright-text">Andrzej Marczewski copyright 2026 version 1.0.2</span>
+            
+            <div class="footer-controls">
+                <button class="footer-btn">Help</button>
+                <button class="footer-btn btn-reset">Reset</button>
+                <button class="footer-btn">Log</button>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

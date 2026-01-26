@@ -1,12 +1,13 @@
-//! Shared DSP utilities for Voice Studio.
+//! Shared DSP utilities for VxCleaner.
 //!
-//! This module contains centralized constants and functions used across multiple
-//! DSP modules to avoid code duplication. All functions in this module are safe
-//! for use in the audio thread (no allocations, no blocking).
+//! Centralized constants and functions used across multiple DSP modules to avoid
+//! code duplication. All functions in this module are safe for use in the audio
+//! thread (no allocations, no blocking).
 //!
-//! ## Important: Audio Thread Safety
-//! - `estimate_f0_autocorr()` requires a pre-allocated scratch buffer
-//! - `make_sqrt_hann_window()` allocates and should only be called during initialization
+//! # Design Notes
+//! - Functions are optimized for real-time audio processing
+//! - Audio thread safety is maintained throughout
+//! - Common DSP operations are centralized here to ensure consistency
 
 use std::f32::consts::PI;
 
@@ -76,7 +77,12 @@ pub fn make_sqrt_hann_window(size: usize) -> Vec<f32> {
 /// Used for envelope followers with attack/release characteristics.
 #[inline]
 pub fn time_constant_coeff(time_ms: f32, sample_rate: f32) -> f32 {
-    (-1.0 / (time_ms * 0.001 * sample_rate)).exp()
+    let denom = time_ms * 0.001 * sample_rate;
+    if denom > 1e-6 {
+        (-1.0 / denom).exp()
+    } else {
+        0.0 // Instant reaction if time or SR is effectively zero
+    }
 }
 
 /// Attack/release envelope follower for squared values (RMS detection).
@@ -183,4 +189,41 @@ pub fn frame_rms(x: &[f32]) -> f32 {
         s += v * v;
     }
     (s / (x.len().max(1) as f32)).sqrt()
+}
+
+// =============================================================================
+// Perceptual Parameter Curves (DSP Stability & Scaling)
+// =============================================================================
+
+/// Perceptual soft curve for most sliders.
+/// Makes 0-50% gentle and musical, 50-100% increasingly aggressive.
+/// Input: normalized 0-1, Output: perceptually curved 0-1
+#[inline]
+pub fn perceptual_curve(x: f32) -> f32 {
+    let x = x.clamp(0.0, 1.0);
+    if x <= 0.5 {
+        // First half: gentle rise (x^1.5 scaled to reach 0.5)
+        (x / 0.5).powf(1.5) * 0.5
+    } else {
+        // Second half: aggressive rise (x^2.2 scaled from 0.5 to 1.0)
+        0.5 + ((x - 0.5) / 0.5).powf(2.2) * 0.5
+    }
+}
+
+/// Aggressive tail curve for clarity, denoise, de-verb.
+/// Preserves usability until ~70%, then ramps hard.
+/// Input: normalized 0-1, Output: aggressively curved 0-1
+#[inline]
+pub fn aggressive_tail(x: f32) -> f32 {
+    x.clamp(0.0, 1.0).powf(2.8)
+}
+
+/// Speech-aware maximum value scaling.
+/// Reduces max effect strength during voiced speech to prevent artifacts.
+/// Input: max value, speech confidence 0-1
+/// Output: scaled max (60-100% of original based on confidence)
+#[inline]
+pub fn speech_weighted(max: f32, speech_conf: f32) -> f32 {
+    let conf = speech_conf.clamp(0.0, 1.0);
+    max * (0.6 + 0.4 * conf)
 }

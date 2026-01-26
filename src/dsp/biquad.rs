@@ -1,3 +1,14 @@
+//! Biquad Filter Implementation (IIR 2nd Order)
+//!
+//! A standard second-order recursive filter used throughout the audio processing chain
+//! for various equalization and filtering tasks. Provides efficient implementation
+//! of common filter types including low-pass, high-pass, shelving, and peaking filters.
+//!
+//! # Design Notes
+//! - Optimized for real-time audio processing with minimal CPU overhead
+//! - Coefficient updates are designed to be smooth to prevent audible artifacts
+//! - All operations are safe for the audio thread (no allocations)
+
 use std::f32::consts::PI;
 
 /// Biquad filter implementation (IIR 2nd order)

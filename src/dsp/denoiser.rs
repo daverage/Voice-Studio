@@ -1,15 +1,23 @@
 //! Denoiser Orchestrator (DSP vs DTLN Routing)
 //!
-//! This module acts as an orchestrator that routes audio through either:
-//! - DSP-based denoiser (traditional spectral Wiener filtering)
-//! - DTLN-based denoiser (deep transform learning network)
+//! Routes audio through either a traditional DSP-based denoiser or a DTLN-based
+//! neural network denoiser based on user configuration. Provides a unified
+//! interface for both approaches while keeping the implementations isolated.
 //!
-//! # Routing Logic
-//! The orchestrator uses the `use_dtln` flag in DenoiseConfig to determine which
-//! implementation to use. The two implementations are completely isolated with
-//! no shared state, buffers, or processing logic.
+//! # Purpose
+//! Offers users a choice between traditional DSP methods and machine learning
+//! approaches for noise reduction, with seamless switching between approaches.
+//!
+//! # Design Notes
+//! - Completely isolates DSP and DTLN implementations
+//! - Provides unified interface for both approaches
+//! - Allows seamless switching between methods
+//! - Maintains separate state for each implementation
 
-use crate::dsp::{dsp_denoiser::{DspDenoiser, DenoiseConfig as DspDenoiseConfig}, dtln_denoiser::StereoDtlnDenoiser};
+use crate::dsp::{
+    dsp_denoiser::{DenoiseConfig as DspDenoiseConfig, DspDenoiser},
+    dtln_denoiser::StereoDtlnDenoiser,
+};
 
 /// Trait defining the interface for stereo denoisers
 pub trait StereoDenoiser {
@@ -18,28 +26,45 @@ pub trait StereoDenoiser {
 
     /// Reset the denoiser state
     fn reset(&mut self);
-
-    /// Prepare for a new sample rate (if needed)
-    fn prepare(&mut self, sample_rate: f32);
 }
 
 /// Combined denoiser that can switch between DSP and DTLN implementations
 pub struct StereoStreamingDenoiser {
     dsp_denoiser: DspDenoiser,
-    dtln_denoiser: StereoDtlnDenoiser,
+    dtln_denoiser: Option<StereoDtlnDenoiser>,
     current_use_dtln: bool,
-    current_sample_rate: f32,
+    _win_size: usize,
+    _hop_size: usize,
+    sample_rate: f32,
 }
 
 impl StereoStreamingDenoiser {
-    pub fn new(win_size: usize, hop_size: usize) -> Self {
-        let sample_rate = 44100.0; // Default sample rate
-
+    pub fn new(win_size: usize, hop_size: usize, sample_rate: f32) -> Self {
         Self {
             dsp_denoiser: DspDenoiser::new(win_size, hop_size),
-            dtln_denoiser: StereoDtlnDenoiser::new(sample_rate),
+            dtln_denoiser: None, // Defer heavy model loading
             current_use_dtln: false,
-            current_sample_rate: sample_rate,
+            _win_size: win_size,
+            _hop_size: hop_size,
+            sample_rate,
+        }
+    }
+
+    /// Explicitly prepare/initialize the models. Safe to call from initialize().
+    pub fn prepare(&mut self, sample_rate: f32) {
+        self.sample_rate = sample_rate;
+        if self.dtln_denoiser.is_none() {
+            match StereoDtlnDenoiser::new(sample_rate) {
+                Ok(dtln) => {
+                    self.dtln_denoiser = Some(dtln);
+                    #[cfg(feature = "debug")]
+                    eprintln!("[DENOISER] DTLN neural network models loaded successfully");
+                }
+                Err(_e) => {
+                    #[cfg(feature = "debug")]
+                    eprintln!("[DENOISER] FAILED to load DTLN models: {:?}", _e);
+                }
+            }
         }
     }
 
@@ -51,22 +76,42 @@ impl StereoStreamingDenoiser {
     ) -> (f32, f32) {
         // Check if we need to switch implementations
         if cfg.use_dtln != self.current_use_dtln {
-            self.current_use_dtln = cfg.use_dtln;
-            // Reset the newly selected denoiser to clear any stale state
-            if cfg.use_dtln {
-                self.dtln_denoiser.reset();
+            if cfg.use_dtln && self.dtln_denoiser.is_some() {
+                self.current_use_dtln = true;
+                if let Some(d) = &mut self.dtln_denoiser {
+                    d.reset();
+                }
+                #[cfg(feature = "debug")]
+                eprintln!("[DENOISER] Switched to DTLN neural network mode");
             } else {
-                // If switching back to DSP, we might want to reset it too
-                // For now, we'll just continue with existing state
+                self.current_use_dtln = false;
+                #[cfg(feature = "debug")]
+                eprintln!("[DENOISER] Switched to DSP spectral mode");
             }
         }
 
-        if cfg.use_dtln {
-            // Route through DTLN implementation
-            self.dtln_denoiser.process_sample(input_l, input_r, cfg.amount)
+        if cfg.use_dtln && self.dtln_denoiser.is_some() {
+            // Route through DTLN implementation with speech confidence
+            if let Some(d) = &mut self.dtln_denoiser {
+                // TODO: Pass speech_confidence through DTLN
+                // For now, DTLN accesses cfg.speech_confidence internally
+                d.process_sample(input_l, input_r, cfg.amount)
+            } else {
+                // Fallback if DTLN failed to load (should not happen with catch_unwind in initialize)
+                #[cfg(feature = "debug")]
+                eprintln!("[DENOISER] WARNING: DTLN not loaded, falling back to DSP");
+                self.dsp_denoiser.process_sample(input_l, input_r, cfg)
+            }
         } else {
             // Route through DSP implementation
             self.dsp_denoiser.process_sample(input_l, input_r, cfg)
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.dsp_denoiser.reset();
+        if let Some(d) = &mut self.dtln_denoiser {
+            d.reset();
         }
     }
 
@@ -78,15 +123,6 @@ impl StereoStreamingDenoiser {
             1.0
         } else {
             self.dsp_denoiser.get_noise_confidence()
-        }
-    }
-
-    /// Prepare for a new sample rate
-    pub fn prepare(&mut self, sample_rate: f32) {
-        if sample_rate != self.current_sample_rate {
-            self.current_sample_rate = sample_rate;
-            // Recreate the DTLN denoiser with the new sample rate
-            self.dtln_denoiser = StereoDtlnDenoiser::new(sample_rate);
         }
     }
 }

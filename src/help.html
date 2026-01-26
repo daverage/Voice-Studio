@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>VxCleaner Help</title>
+        <style>
+            body {
+                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+                background-color: #0f172a;
+                color: #e2e8f0;
+                margin: 0;
+                padding: 20px;
+                line-height: 1.6;
+            }
+            .container {
+                max-width: 900px;
+                margin: 0 auto;
+                background-color: #1e293b;
+                padding: 30px;
+                border-radius: 8px;
+            }
+            .header {
+                display: flex;
+                align-items: center;
+                margin-bottom: 30px;
+                padding-bottom: 20px;
+                border-bottom: 1px solid #334155;
+            }
+            .logo {
+                width: 60px;
+                height: 60px;
+                margin-right: 20px;
+            }
+            h1 {
+                color: #ffffff;
+                font-size: 24px;
+                margin: 0;
+            }
+            h2 {
+                color: #60a5fa;
+                border-bottom: 1px solid #334155;
+                padding-bottom: 5px;
+                margin-top: 32px;
+            }
+            h3 {
+                color: #93c5fd;
+                margin-top: 22px;
+            }
+            .section {
+                margin-bottom: 28px;
+            }
+            .control-group {
+                background-color: #334155;
+                padding: 15px;
+                border-radius: 6px;
+                margin: 12px 0;
+            }
+            .control-name {
+                font-weight: bold;
+                color: #bfdbfe;
+            }
+            .highlight {
+                background-color: #1e293b;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-weight: 500;
+            }
+            ul {
+                padding-left: 20px;
+            }
+            li {
+                margin-bottom: 8px;
+            }
+            .audio-chain {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                margin: 16px 0;
+            }
+            .chain-step {
+                background-color: #334155;
+                padding: 10px 15px;
+                border-radius: 4px;
+                display: flex;
+                align-items: center;
+            }
+            .chain-step-number {
+                background-color: #1d4ed8;
+                color: white;
+                width: 24px;
+                height: 24px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin-right: 10px;
+                flex-shrink: 0;
+            }
+            .footer {
+                margin-top: 40px;
+                padding-top: 20px;
+                border-top: 1px solid #334155;
+                text-align: center;
+                color: #94a3b8;
+                font-size: 14px;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div class="container">
+            <div class="header">
+                <img
+                    src="assets/icons/1024x1024.png"
+                    alt="VxCleaner Logo"
+                    class="logo"
+                    onerror="this.style.display = 'none'"
+                />
+                <h1>VxCleaner Help</h1>
+            </div>
+
+            <div class="section">
+                <h2>About VxCleaner</h2>
+                <p>
+                    VxCleaner is a professional vocal restoration and
+                    enhancement plugin designed specifically for spoken voice.
+                    Its goal is to make dialogue feel clear, stable, and
+                    effortless to listen to without sounding processed.
+                </p>
+                <p>
+                    VxCleaner is not a collection of independent effects. It
+                    is a guided system with a fixed signal flow, perceptual
+                    safety limits, and intentional constraints designed to
+                    preserve natural voice character.
+                </p>
+                <p>
+                    Several corrective processes run automatically in the
+                    background. These are always active, carefully tuned for
+                    speech, and intentionally hidden to avoid unnecessary
+                    technical decisions.
+                </p>
+
+                <h3>Designed For</h3>
+                <ul>
+                    <li>
+                        Voice-over, podcasting, broadcast, dialogue, and
+                        narration
+                    </li>
+                    <li>Real-time use in DAWs and live monitoring workflows</li>
+                    <li>
+                        Reducing noise, room coloration, and vocal inconsistency
+                    </li>
+                </ul>
+
+                <h3>Not Designed For</h3>
+                <ul>
+                    <li>Singing or melodic material</li>
+                    <li>
+                        Non-stationary noises such as clicks, bangs, keyboard
+                        hits, or other transient events that require manual or
+                        offline repair
+                    </li>
+                    <li>Severely clipped or distorted recordings</li>
+                    <li>Forensic spectral editing workflows</li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>Modes</h2>
+
+                <div class="control-group">
+                    <div class="control-name">Simple Mode</div>
+                    <p>
+                        Simple Mode offers three macro controls that adjust
+                        multiple processors at once. It is designed for fast,
+                        reliable results without technical decision-making.
+                    </p>
+                    <ul>
+                        <li>
+                            <span class="highlight">Distance</span> – Room
+                            reduction and proximity shaping
+                        </li>
+                        <li>
+                            <span class="highlight">Clarity</span> – Noise,
+                            de-essing, and spectral cleanup
+                        </li>
+                        <li>
+                            <span class="highlight">Consistency</span> –
+                            Loudness stability and dynamics
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="control-group">
+                    <div class="control-name">Advanced Mode</div>
+                    <p>
+                        Advanced Mode exposes individual controls for precise
+                        influence over each processing stage. Some advanced
+                        controls indirectly influence automatic processes
+                        without exposing technical parameters.
+                    </p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Controls Explained</h2>
+
+                <div class="control-group">
+                    <div class="control-name">Clean & Repair</div>
+                    <ul>
+                        <li>
+                            <span class="highlight">Noise Reduction</span> –
+                            Reduces steady background noise (Normal/Aggressive)
+                        </li>
+                        <li>
+                            <span class="highlight">Tone</span> – Biases noise
+                            reduction toward rumble or hiss
+                        </li>
+                        <li>
+                            <span class="highlight">De-Verb</span> – Reduces
+                            room reflections
+                        </li>
+                        <li>
+                            <span class="highlight">Clarity</span> – Improves
+                            intelligibility
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="control-group">
+                    <div class="control-name">Noise Reduction Modes</div>
+                    <p>
+                        VxCleaner offers two approaches to noise reduction
+                        accessible through the Mode toggle:
+                    </p>
+                    <ul>
+                        <li>
+                            <span class="highlight">Normal (DSP)</span> – Our
+                            state-of-the-art digital signal processing engine
+                            featuring advanced spectral analysis, adaptive noise
+                            profiling, and real-time Wiener filtering optimized
+                            specifically for voice applications
+                        </li>
+                        <li>
+                            <span class="highlight">Aggressive (DTLN)</span> –
+                            Deep learning approach that uses neural networks
+                            trained on speech and noise patterns for more
+                            intelligent noise separation
+                        </li>
+                    </ul>
+                    <p>
+                        The <span class="highlight">Mode Toggle</span> switches
+                        between these two approaches.
+                    </p>
+                </div>
+
+                <div class="control-group">
+                    <div class="control-name">Our Advanced DSP Technology</div>
+                    <p>
+                        VxCleaner's proprietary DSP engine represents the
+                        pinnacle of audio restoration technology:
+                    </p>
+                    <ul>
+                        <li>
+                            <span class="highlight"
+                                >Adaptive Noise Profiling</span
+                            >
+                            – Continuously analyzes and adapts to changing noise
+                            characteristics
+                        </li>
+                        <li>
+                            <span class="highlight"
+                                >Spectral Masking Algorithms</span
+                            >
+                            – Preserves vocal clarity while eliminating unwanted
+                            artifacts
+                        </li>
+                        <li>
+                            <span class="highlight"
+                                >Real-Time Wiener Filtering</span
+                            >
+                            – Mathematically optimal noise reduction with
+                            minimal speech distortion
+                        </li>
+                        <li>
+                            <span class="highlight"
+                                >Voice-Optimized Processing</span
+                            >
+                            – Specifically tuned for human speech patterns and
+                            frequencies
+                        </li>
+                        <li>
+                            <span class="highlight"
+                                >Zero-Latency Operation</span
+                            >
+                            – Perfect for real-time monitoring and recording
+                        </li>
+                    </ul>
+                    <p>
+                        Our DSP technology delivers professional-grade results
+                        that rival expensive standalone solutions, all while
+                        maintaining the natural character of your voice.
+                    </p>
+                </div>
+
+                <div class="control-group">
+                    <div class="control-name">Polish & Enhance</div>
+                    <ul>
+                        <li>
+                            <span class="highlight">Proximity</span> – Restores
+                            close-mic body
+                        </li>
+                        <li>
+                            <span class="highlight">De-Ess</span> – Controls
+                            harsh sibilance
+                        </li>
+                        <li>
+                            <span class="highlight">Leveler</span> – Smooths
+                            loudness variation
+                        </li>
+                        <li>
+                            <span class="highlight">Output Gain</span> – Final
+                            level adjustment
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="control-group">
+                    <div class="control-name">Final Output Presets</div>
+                    <p>
+                        Delivery contracts that enforce loudness and true-peak
+                        targets:
+                    </p>
+                    <ul>
+                        <li>
+                            <span class="highlight">None</span> - No loudness
+                            enforcement
+                        </li>
+                        <li>
+                            <span class="highlight">Broadcast</span> - -23 LUFS
+                            integrated loudness, -1.0 dBTP true peak ceiling
+                        </li>
+                        <li>
+                            <span class="highlight">YouTube</span> - -14 LUFS
+                            integrated loudness, -1.0 dBTP true peak ceiling
+                        </li>
+                        <li>
+                            <span class="highlight">Spotify</span> - -14 LUFS
+                            integrated loudness, -1.0 dBTP true peak ceiling
+                        </li>
+                    </ul>
+                </div>
+
+                <div class="control-group">
+                    <div class="control-name">
+                        Automatic Background Processing
+                    </div>
+                    <ul>
+                        <li>
+                            <span class="highlight"
+                                >Speech High-Pass Filtering</span
+                            >
+                            – Removes subsonic rumble
+                        </li>
+                        <li>
+                            <span class="highlight">Plosive Softening</span> –
+                            Controls low-frequency consonant bursts
+                        </li>
+                        <li>
+                            <span class="highlight">Breath Management</span> –
+                            Reduces breath prominence during pauses
+                        </li>
+                    </ul>
+                    <p>
+                        These processes are conservative, speech-aware, and
+                        never mute the signal.
+                    </p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Audio Processing Chain</h2>
+
+                <div class="audio-chain">
+                    <div class="chain-step">
+                        <div class="chain-step-number">1</div>
+                        Input Signal
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">2</div>
+                        Speech High-Pass Filtering
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">3</div>
+                        Early Reflection Suppression
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">4</div>
+                        Speech Analysis & Envelope Tracking
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">5</div>
+                        Noise Reduction
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">6</div>
+                        Plosive Softening
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">7</div>
+                        Breath Management
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">8</div>
+                        De-Reverb Processing
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">9</div>
+                        Creative Shaping
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">10</div>
+                        Dynamics & Guardrails
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">11</div>
+                        Limiter
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">12</div>
+                        Output Gain
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Technical Notes</h2>
+                <ul>
+                    <li>All processing is real-time with minimal latency</li>
+                    <li>Parameters are smoothed to prevent artifacts</li>
+                    <li>Phase coherence is preserved</li>
+                    <li>Some processing is intentionally hidden for safety</li>
+                </ul>
+            </div>
+
+            <div class="footer">
+                <p>VxCleaner v1.0.1</p>
+                <p>Copyright © Andrzej Marczewski 2026. All rights reserved.</p>
+            </div>
+        </div>
+    </body>
+</html>

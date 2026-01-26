@@ -1,13 +1,18 @@
 //! Speech-aware Downward Expander
 //!
-//! Controls pauses and room swell without hard gating. Uses speech confidence
+//! Controls pauses and room swell without hard gating by using speech confidence
 //! to weight expansion - applies more attenuation during non-speech sections
 //! while preserving natural dynamics during speech.
 //!
-//! # Perceptual Contract
-//! - **Target Source**: Speech with background noise between phrases.
-//! - **Intended Effect**: Gentle downward expansion of noise during pauses.
-//! - **Failure Modes**:
+//! # Purpose
+//! Reduces background noise during pauses and quiet sections while maintaining
+//! natural speech dynamics and avoiding the pumping artifacts of hard gates.
+//!
+//! # Design Notes
+//! - Uses speech confidence to intelligently apply expansion
+//! - More attenuation during non-speech sections, preservation during speech
+//! - Gentle approach avoids pumping artifacts of hard gates
+//! - Maintains natural dynamics of the voice
 //!   - "Chattering" if attack/release is poorly tuned.
 //!   - Cutting off breath intakes or soft phrase starts.
 //! - **Will Not Do**:
@@ -35,6 +40,7 @@
 //! - No allocations during `process()`
 //! - All state pre-initialized in `new()`
 
+use super::envelope::VoiceEnvelope;
 use super::speech_confidence::SpeechSidechain;
 use super::utils::{db_to_lin, lin_to_db, time_constant_coeff, DB_EPS};
 
@@ -73,8 +79,8 @@ const MIN_THRESHOLD_DB: f32 = -60.0;
 /// Maximum threshold in dB (to prevent over-expansion)
 const MAX_THRESHOLD_DB: f32 = -30.0;
 
-/// RMS window time in milliseconds
-const RMS_WINDOW_MS: f32 = 10.0;
+/// RMS threshold below which the expander stays transparent during silence
+const SILENCE_EXPAND_RMS: f32 = 0.0012;
 
 // =============================================================================
 // Speech Expander
@@ -84,11 +90,6 @@ const RMS_WINDOW_MS: f32 = 10.0;
 pub struct SpeechExpander {
     #[allow(dead_code)] // Stored for potential sample rate change support
     sample_rate: f32,
-
-    // RMS envelope followers (stereo-linked)
-    rms_sq_l: f32,
-    rms_sq_r: f32,
-    rms_coeff: f32,
 
     // Gain reduction state
     gain_env: f32,
@@ -109,15 +110,10 @@ pub struct SpeechExpander {
 
 impl SpeechExpander {
     pub fn new(sample_rate: f32) -> Self {
-        let rms_samples = (RMS_WINDOW_MS * 0.001 * sample_rate).max(1.0);
-        let rms_coeff = (-1.0 / rms_samples).exp();
         let hold_samples = ((HOLD_MS * 0.001 * sample_rate) as usize).max(1);
 
         Self {
             sample_rate,
-            rms_sq_l: 0.0,
-            rms_sq_r: 0.0,
-            rms_coeff,
             gain_env: 1.0,
             attack_coeff: time_constant_coeff(ATTACK_MS, sample_rate),
             release_coeff: time_constant_coeff(RELEASE_MS, sample_rate),
@@ -143,22 +139,25 @@ impl SpeechExpander {
         right: f32,
         amount: f32,
         sidechain: &SpeechSidechain,
+        env_l: &VoiceEnvelope,
+        env_r: &VoiceEnvelope,
     ) -> (f32, f32) {
         // Bypass if amount is negligible
         if amount < 0.001 {
             return (left, right);
         }
 
-        // Update RMS envelope (stereo-linked)
-        let in_sq_l = left * left;
-        let in_sq_r = right * right;
-        self.rms_sq_l = self.rms_coeff * self.rms_sq_l + (1.0 - self.rms_coeff) * in_sq_l;
-        self.rms_sq_r = self.rms_coeff * self.rms_sq_r + (1.0 - self.rms_coeff) * in_sq_r;
+        // Use shared RMS envelope (stereo-linked)
+        let rms_l = env_l.rms;
+        let rms_r = env_r.rms;
 
         // Linked RMS (max of both channels)
-        let rms_sq = self.rms_sq_l.max(self.rms_sq_r);
-        let rms = rms_sq.sqrt();
+        let rms = rms_l.max(rms_r);
         let rms_db = lin_to_db(rms);
+
+        if rms < SILENCE_EXPAND_RMS && sidechain.speech_conf < 0.2 {
+            return (left, right);
+        }
 
         // Adaptive threshold based on noise floor
         self.threshold_db = (sidechain.noise_floor_db + THRESHOLD_OFFSET_DB)
@@ -219,8 +218,6 @@ impl SpeechExpander {
     /// Reset all state
     #[allow(dead_code)]
     pub fn reset(&mut self) {
-        self.rms_sq_l = 0.0;
-        self.rms_sq_r = 0.0;
         self.gain_env = 1.0;
         self.hold_counter = 0;
         self.threshold_db = MIN_THRESHOLD_DB;
@@ -262,7 +259,14 @@ mod tests {
 
         let input_l = 0.5;
         let input_r = 0.3;
-        let (out_l, out_r) = expander.process(input_l, input_r, 0.0, &sidechain);
+        let (out_l, out_r) = expander.process(
+            input_l,
+            input_r,
+            0.0,
+            &sidechain,
+            &VoiceEnvelope::default(),
+            &VoiceEnvelope::default(),
+        );
 
         assert!((out_l - input_l).abs() < 1e-10);
         assert!((out_r - input_r).abs() < 1e-10);
@@ -278,7 +282,14 @@ mod tests {
 
         // Process some samples at moderate level
         for _ in 0..1000 {
-            expander.process(0.1, 0.1, 1.0, &sidechain);
+            expander.process(
+                0.1,
+                0.1,
+                1.0,
+                &sidechain,
+                &VoiceEnvelope::default(),
+                &VoiceEnvelope::default(),
+            );
         }
 
         // With speech_conf = 1.0, expansion should be minimal
@@ -296,7 +307,14 @@ mod tests {
 
         // Process very quiet signal
         for _ in 0..10000 {
-            expander.process(0.0001, 0.0001, 1.0, &sidechain);
+            expander.process(
+                0.0001,
+                0.0001,
+                1.0,
+                &sidechain,
+                &VoiceEnvelope::default(),
+                &VoiceEnvelope::default(),
+            );
         }
 
         // Should see some gain reduction

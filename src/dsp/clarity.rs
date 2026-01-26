@@ -1,19 +1,23 @@
-//! Clarity Enhancer & Detector
+//! Dynamic Low-Mid Congestion Controller & Detector
 //!
-//! # Perceptual Contract
-//! - **Target Source**: Dull, muffled, or "sock-over-mic" speech.
-//! - **Intended Effect**: Enhance presence (2-5kHz) and air (10kHz+) to improve intelligibility.
-//! - **Failure Modes**:
-//!   - Harshness / fatigue if boosted too much.
-//!   - Exaggeration of sibilance or mouth noise.
-//! - **Will Not Do**:
-//!   - "Un-muffle" audio with zero HF content (cannot boost zero).
+//! Reduces low-mid congestion (120–380 Hz) during voiced speech to restore
+//! perceived clarity after tonal shaping. Uses voiced speech detection to
+//! apply targeted reduction only when needed, preserving natural voice character.
 //!
-//! # Lifecycle
-//! - **Active**: Normal operation.
-//! - **Bypassed**: Passes audio through.
+//! # Purpose
+//! Address chesty, congested, or "muddy" speech with low-mid buildup by
+//! dynamically reducing low-mid frequencies during voiced speech segments.
+//! Maintains subtractive-only processing to complement upstream processing.
+//!
+//! # Design Notes
+//! - Targets low-mid congestion range (120-380 Hz)
+//! - Uses voiced speech detection for intelligent application
+//! - Remains subtractive only (no high-frequency boosting)
+//! - Works in conjunction with pink reference bias for balanced tonal shaping
 
-use crate::dsp::utils::{time_constant_coeff, update_env_sq, DB_EPS};
+use crate::dsp::utils::{
+    aggressive_tail, speech_weighted, time_constant_coeff, update_env_sq, DB_EPS,
+};
 use crate::dsp::Biquad;
 
 // Constants for clarity detector tuning
@@ -52,15 +56,9 @@ const SHAPER_FREQ_HZ: f32 = 250.0;
 // Shaper filter Q.
 // Increasing: narrower transition; decreasing: wider transition.
 const SHAPER_Q: f32 = 0.7;
-// Proximity scaling base (minimum scale at proximity=0).
-// Increasing: more baseline effect; decreasing: less baseline.
-const PROX_SCALE_BASE: f32 = 0.5;
-// Proximity scaling range (additional scale at proximity=1).
-// Increasing: more proximity influence; decreasing: less influence.
-const PROX_SCALE_RANGE: f32 = 0.8;
 // Maximum low-mid cut at full clarity (dB).
 // Increasing: stronger cut; decreasing: gentler cut.
-const MAX_CUT_DB: f32 = 16.0;
+const MAX_CUT_DB: f32 = 64.0;
 // Coefficient smoothing factor.
 // Increasing: faster transitions; decreasing: smoother transitions.
 const SMOOTH_COEFF: f32 = 0.02;
@@ -71,7 +69,7 @@ const COEFF_UPDATE_THRESHOLD: f32 = 0.05;
 // Increasing: easier to bypass; decreasing: more likely to process.
 const CLARITY_BYPASS_EPS: f32 = 0.001;
 
-/// Shared stereo-linked detector for Clarity control
+/// Shared stereo-linked detector for body energy detection
 pub struct ClarityDetector {
     hp: Biquad,
     lp: Biquad,
@@ -107,7 +105,7 @@ impl ClarityDetector {
         time_constant_coeff(ms, self.sample_rate)
     }
 
-    /// Returns clarity drive signal [0..1]
+    /// Returns body energy drive signal [0..1]
     pub fn analyze(&mut self, l: f32, r: f32) -> f32 {
         let x = l.abs().max(r.abs());
 
@@ -131,7 +129,7 @@ impl ClarityDetector {
         self.zc_energy = self.zc_energy * ZC_DECAY + zc * ZC_ATTACK;
         let voiced = (1.0 - self.zc_energy * ZC_VOICED_SCALE).clamp(0.0, 1.0);
 
-        // Final clarity drive
+        // Final body energy drive
         (rms * voiced).clamp(0.0, 1.0)
     }
 }
@@ -140,8 +138,8 @@ impl ClarityDetector {
 ///
 /// ## Metric Ownership (SHARED with Proximity)
 /// This module OWNS and is responsible for:
-/// - **Presence ratio**: Contributes to target (≤ 0.01) via HF enhancement
-/// - **Air ratio**: Contributes to target (≤ 0.005)
+/// - **Presence ratio**: Contributes to target (≤ 0.01) via low-mid cleanup
+/// - **Air ratio**: Contributes to target (≤ 0.005) via reduced low-mid masking
 ///
 /// This module must NOT attempt to modify:
 /// - RMS, crest factor, RMS variance (owned by Leveler)
@@ -172,18 +170,34 @@ impl Clarity {
     }
 
     /// clarity: user slider (0..1)
-    /// proximity: proximity slider (0..1)
+    /// speech_confidence: speech confidence from detector (0..1)
     /// drive: shared detector output (0..1)
-    pub fn process(&mut self, input: f32, clarity: f32, proximity: f32, drive: f32) -> f32 {
-        // Proximity-aware scaling
-        let prox_scale = PROX_SCALE_BASE + PROX_SCALE_RANGE * proximity;
-        let effective = if clarity <= CLARITY_BYPASS_EPS {
-            0.0
-        } else {
-            clarity * prox_scale * drive
-        };
+    pub fn process(&mut self, input: f32, clarity: f32, speech_confidence: f32, drive: f32) -> f32 {
+        // Clarity = reduce low-mid mud (subtractive only)
+        // Uses aggressive_tail curve to preserve usability until ~70%
 
-        let target_cut_db = -MAX_CUT_DB * effective;
+        if clarity <= CLARITY_BYPASS_EPS {
+            return input;
+        }
+
+        // Apply aggressive tail curve to slider
+        let x = aggressive_tail(clarity);
+
+        // Speech-weighted max cut (reduces max during voiced speech)
+        let max_cut_db = speech_weighted(MAX_CUT_DB, speech_confidence);
+
+        // Calculate effective cut
+        let mut clarity_cut_db = x * max_cut_db * drive;
+
+        // Hard guardrail: never exceed 48dB
+        clarity_cut_db = clarity_cut_db.min(48.0);
+
+        // Additional speech protection: if highly confident speech, limit to 30dB
+        if speech_confidence > 0.6 {
+            clarity_cut_db = clarity_cut_db.min(30.0);
+        }
+
+        let target_cut_db = -clarity_cut_db;
 
         // Smooth coefficient changes
         let cut_db = self.last_cut_db + SMOOTH_COEFF * (target_cut_db - self.last_cut_db);
@@ -194,6 +208,8 @@ impl Clarity {
                 .update_low_shelf(SHAPER_FREQ_HZ, SHAPER_Q, cut_db, self.sample_rate);
         }
 
+        // This module must remain subtractive only.
+        // Presence and air are handled upstream by Pink Reference Bias.
         self.shaper.process(input)
     }
 }

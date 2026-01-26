@@ -1,13 +1,18 @@
 //! Spectral Guardrails (Safety Layer)
 //!
-//! Prevents extreme macro or advanced control combinations from breaking sound.
-//! Tracks band energy ratios and applies dynamic corrections when thresholds
-//! are exceeded. Also enforces maximum gain slew rate globally.
+//! Prevents extreme macro or advanced control combinations from breaking the sound
+//! by tracking band energy ratios and applying dynamic corrections when thresholds
+//! are exceeded. Also enforces maximum gain slew rate globally to prevent artifacts.
 //!
-//! # Perceptual Contract
-//! - **Target Source**: Signals with extreme spectral imbalances (e.g. from user error).
-//! - **Intended Effect**: Gently pull extreme spectral tilts back to safe norms ("guardrails").
-//! - **Failure Modes**:
+//! # Purpose
+//! Acts as a safety net that gently pulls extreme spectral adjustments back to safe
+//! norms, preventing user error from causing audible artifacts or unstable behavior.
+//!
+//! # Design Notes
+//! - Monitors band energy ratios continuously
+//! - Applies corrections only when thresholds are exceeded
+//! - Enforces maximum gain slew rate to prevent artifacts
+//! - Gently guides extreme settings back to safe operating ranges
 //!   - Dullness if triggers on legitimate bright voices.
 //!   - Volume dips if slew limiting is triggered aggressively.
 //! - **Will Not Do**:
@@ -60,6 +65,7 @@ const RMS_TIME_MS: f32 = 30.0;
 
 /// Correction smoothing time in milliseconds
 const CORRECTION_SMOOTH_MS: f32 = 50.0;
+const HF_CONF_THRESHOLD: f32 = 0.3;
 
 // =============================================================================
 // Spectral Guardrails
@@ -209,7 +215,13 @@ impl SpectralGuardrails {
     ///
     /// Returns (processed_left, processed_right)
     #[inline]
-    pub fn process(&mut self, left: f32, right: f32, enabled: bool) -> (f32, f32) {
+    pub fn process(
+        &mut self,
+        left: f32,
+        right: f32,
+        enabled: bool,
+        speech_confidence: f32,
+    ) -> (f32, f32) {
         // Always track band energies (for monitoring)
         self.update_band_energy(left, right);
 
@@ -218,7 +230,7 @@ impl SpectralGuardrails {
         }
 
         // Calculate target corrections based on ratios
-        let (target_low_cut, target_high_cut) = self.calculate_corrections();
+        let (target_low_cut, target_high_cut) = self.calculate_corrections(speech_confidence);
 
         // Smooth corrections
         self.low_mid_cut_db = self.correction_coeff * self.low_mid_cut_db
@@ -300,7 +312,7 @@ impl SpectralGuardrails {
     }
 
     /// Calculate target correction amounts based on band ratios
-    fn calculate_corrections(&self) -> (f32, f32) {
+    fn calculate_corrections(&self, speech_confidence: f32) -> (f32, f32) {
         let speech_rms = self.rms_speech_sq.sqrt();
 
         if speech_rms < DB_EPS {
@@ -320,11 +332,17 @@ impl SpectralGuardrails {
         };
 
         // High correction
-        let high_cut = if high_ratio > HIGH_RATIO_THRESHOLD {
+        let base_high_cut = if high_ratio > HIGH_RATIO_THRESHOLD {
             let excess = (high_ratio - HIGH_RATIO_THRESHOLD) / HIGH_RATIO_THRESHOLD;
             (excess * MAX_HIGH_CUT_DB).min(MAX_HIGH_CUT_DB)
         } else {
             0.0
+        };
+
+        let high_cut = if speech_confidence < HF_CONF_THRESHOLD {
+            0.0
+        } else {
+            base_high_cut
         };
 
         (low_cut, high_cut)

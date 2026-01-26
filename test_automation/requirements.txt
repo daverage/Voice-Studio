@@ -1,0 +1,18 @@
+# Audio processing and VST hosting
+pedalboard>=0.7.0
+soundfile>=0.12.0
+librosa>=0.10.0
+
+# Audio quality metrics
+pesq>=0.0.4
+pystoi>=0.3.3
+
+# Optimization
+optuna>=3.0.0
+
+# Scientific computing
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Data handling
+pandas>=2.0.0

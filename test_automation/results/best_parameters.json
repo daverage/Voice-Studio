@@ -1,0 +1,10 @@
+{
+  "noise_reduction": 0.0,
+  "noise_mode": 0.0,
+  "reverb_reduction": 0.75,
+  "proximity": 0.4,
+  "clarity": 0.05,
+  "de_esser": 0.25,
+  "leveler": 0.05,
+  "breath_control": 0.45
+}

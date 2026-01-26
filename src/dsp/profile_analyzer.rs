@@ -1,12 +1,18 @@
 //! Profile Analyzer (Metric Computation for Data-Driven Calibration)
 //!
-//! Computes all metrics needed for AudioProfile from audio samples.
-//! Used to generate InputProfile (pre-DSP) and OutputProfile (post-DSP).
+//! Computes all metrics needed for AudioProfile from audio samples to enable
+//! data-driven calibration of the processing chain. Generates both InputProfile
+//! (pre-DSP) and OutputProfile (post-DSP) for comparison and adaptive processing.
 //!
-//! ## Audio Thread Safety
-//! - All buffers are pre-allocated in `new()`
-//! - No allocations during `process()`
-//! - Frame-based analysis for efficiency
+//! # Purpose
+//! Provides comprehensive audio analysis to inform the adaptive processing
+//! system about the characteristics of the input and output signals.
+//!
+//! # Design Notes
+//! - All buffers are pre-allocated in `new()` for audio thread safety
+//! - No allocations during `process()` to maintain real-time performance
+//! - Frame-based analysis for computational efficiency
+//! - Used for both input analysis and output validation
 
 use super::biquad::Biquad;
 use super::utils::{time_constant_coeff, DB_EPS};
@@ -46,6 +52,12 @@ const RMS_VARIANCE_FRAMES: usize = 20;
 /// Noise floor tracking coefficients
 const NOISE_FLOOR_ATTACK_MS: f32 = 500.0;
 const NOISE_FLOOR_RELEASE_MS: f32 = 100.0;
+
+/// Silences before baselines relax faster
+const SILENCE_RELAX_FRAMES: usize = 4;
+
+/// Release time for relaxing noise floor during silence
+const SILENCE_RELAX_RELEASE_MS: f32 = 60.0;
 
 /// Decay slope measurement delay after speech onset (prevents plosive artifacts)
 const DECAY_SLOPE_DELAY_MS: f32 = 75.0;
@@ -114,6 +126,8 @@ pub struct ProfileAnalyzer {
     noise_floor_sq: f32,
     noise_attack_coeff: f32,
     noise_release_coeff: f32,
+    silence_release_coeff: f32,
+    silence_frame_count: usize,
 
     // Early/Late energy tracking (for reverb analysis)
     early_energy: f32,
@@ -229,6 +243,8 @@ impl ProfileAnalyzer {
             noise_floor_sq: 1e-8,
             noise_attack_coeff: time_constant_coeff(NOISE_FLOOR_ATTACK_MS, sample_rate),
             noise_release_coeff: time_constant_coeff(NOISE_FLOOR_RELEASE_MS, sample_rate),
+            silence_release_coeff: time_constant_coeff(SILENCE_RELAX_RELEASE_MS, sample_rate),
+            silence_frame_count: 0,
 
             early_energy: 0.0,
             late_energy: 0.0,
@@ -248,59 +264,6 @@ impl ProfileAnalyzer {
 
             current_profile: crate::AudioProfile::default(),
         }
-    }
-
-    /// Prepare the analyzer for a new sample rate
-    pub fn prepare(&mut self, sample_rate: f32) {
-        // Update sample rate dependent parameters
-        self.sample_rate = sample_rate;
-        self.frame_size = ((FRAME_MS * 0.001 * sample_rate) as usize).min(MAX_FRAME_SAMPLES);
-        self.early_window_samples = (EARLY_WINDOW_MS * 0.001 * sample_rate) as usize;
-        self.decay_slope_delay_samples = (DECAY_SLOPE_DELAY_MS * 0.001 * sample_rate) as usize;
-        self.decay_slope_window_frames = (DECAY_SLOPE_WINDOW_MS / FRAME_MS).ceil() as usize;
-
-        // Update noise floor tracking coefficients
-        self.noise_attack_coeff = time_constant_coeff(NOISE_FLOOR_ATTACK_MS, sample_rate);
-        self.noise_release_coeff = time_constant_coeff(NOISE_FLOOR_RELEASE_MS, sample_rate);
-
-        // Update all filter coefficients for the new sample rate
-        self.presence_hp_l.update_hpf(PRESENCE_LOW_HZ, 0.707, sample_rate);
-        self.presence_hp_r.update_hpf(PRESENCE_LOW_HZ, 0.707, sample_rate);
-        self.presence_lp_l.update_lpf(PRESENCE_HIGH_HZ, 0.707, sample_rate);
-        self.presence_lp_r.update_lpf(PRESENCE_HIGH_HZ, 0.707, sample_rate);
-
-        self.air_hp_l.update_hpf(AIR_LOW_HZ, 0.707, sample_rate);
-        self.air_hp_r.update_hpf(AIR_LOW_HZ, 0.707, sample_rate);
-        self.air_lp_l.update_lpf(AIR_HIGH_HZ, 0.707, sample_rate);
-        self.air_lp_r.update_lpf(AIR_HIGH_HZ, 0.707, sample_rate);
-
-        self.hf_var_hp_l.update_hpf(HF_VAR_LOW_HZ, 0.707, sample_rate);
-        self.hf_var_hp_r.update_hpf(HF_VAR_LOW_HZ, 0.707, sample_rate);
-        self.hf_var_lp_l.update_lpf(HF_VAR_HIGH_HZ, 0.707, sample_rate);
-        self.hf_var_lp_r.update_lpf(HF_VAR_HIGH_HZ, 0.707, sample_rate);
-
-        self.fullband_hp_l.update_hpf(FULLBAND_LOW_HZ, 0.707, sample_rate);
-        self.fullband_hp_r.update_hpf(FULLBAND_LOW_HZ, 0.707, sample_rate);
-        self.fullband_lp_l.update_lpf(FULLBAND_HIGH_HZ, 0.707, sample_rate);
-        self.fullband_lp_r.update_lpf(FULLBAND_HIGH_HZ, 0.707, sample_rate);
-
-        // Reset frame counters and accumulators to ensure clean state after sample rate change
-        self.sample_count = 0;
-        self.energy_total = 0.0;
-        self.energy_presence = 0.0;
-        self.energy_air = 0.0;
-        self.energy_hf = 0.0;
-        self.energy_fullband = 0.0;
-        self.peak_abs = 0.0;
-        self.early_energy = 0.0;
-        self.late_energy = 0.0;
-        self.early_samples = 0;
-        self.prev_rms = 0.0;
-        self.decay_accumulator = 0.0;
-        self.decay_count = 0;
-        self.speech_active = false;
-        self.speech_onset_frames = 0;
-        self.stable_decay_slope = 0.0;
     }
 
     /// Process a stereo sample pair and update profile metrics
@@ -390,9 +353,14 @@ impl ProfileAnalyzer {
             self.noise_floor_sq = self.noise_attack_coeff * self.noise_floor_sq
                 + (1.0 - self.noise_attack_coeff) * frame_energy_sq;
         } else {
-            // Slow release
-            self.noise_floor_sq = self.noise_release_coeff * self.noise_floor_sq
-                + (1.0 - self.noise_release_coeff) * frame_energy_sq;
+            // Slow release (relaxes faster after sustained silence)
+            let release_coeff = if self.silence_frame_count >= SILENCE_RELAX_FRAMES {
+                self.silence_release_coeff
+            } else {
+                self.noise_release_coeff
+            };
+            self.noise_floor_sq =
+                release_coeff * self.noise_floor_sq + (1.0 - release_coeff) * frame_energy_sq;
         }
         self.noise_floor_sq = self.noise_floor_sq.clamp(1e-12, 0.1);
         let noise_floor = self.noise_floor_sq.sqrt();
@@ -405,7 +373,7 @@ impl ProfileAnalyzer {
         };
 
         // 5. Early/Late ratio
-        let early_late_ratio = if self.late_energy > DB_EPS {
+        let early_late_ratio = if self.late_energy > DB_EPS && self.early_window_samples > 0 {
             (self.early_energy / self.early_window_samples as f32)
                 / (self.late_energy / (self.sample_count - self.early_window_samples).max(1) as f32)
         } else if self.early_energy > DB_EPS {
@@ -434,6 +402,12 @@ impl ProfileAnalyzer {
                 self.speech_active = false;
                 self.speech_onset_frames = 0;
             }
+
+            self.silence_frame_count = if is_speech_frame {
+                0
+            } else {
+                self.silence_frame_count.saturating_add(1)
+            };
 
             // Calculate delay in frames (decay_slope_delay_samples / frame_size)
             let delay_frames = (self.decay_slope_delay_samples / self.frame_size).max(1);
@@ -559,6 +533,7 @@ impl ProfileAnalyzer {
         self.speech_active = false;
         self.speech_onset_frames = 0;
         self.stable_decay_slope = 0.0;
+        self.silence_frame_count = 0;
         self.current_profile = crate::AudioProfile::default();
 
         // Reset filters
@@ -578,25 +553,6 @@ impl ProfileAnalyzer {
         self.fullband_hp_r.reset();
         self.fullband_lp_l.reset();
         self.fullband_lp_r.reset();
-    }
-
-    /// Perform long-running stability maintenance - periodically reset learned states
-    /// to prevent drift over multi-hour sessions
-    pub fn maintain_stability(&mut self) {
-        // Clamp noise floor to prevent extreme drift
-        self.noise_floor_sq = self.noise_floor_sq.clamp(1e-12, 0.1);
-
-        // Reset decay accumulator if it's accumulated for too long without processing
-        if self.decay_count > self.decay_slope_window_frames * 2 {
-            self.decay_accumulator = 0.0;
-            self.decay_count = 0;
-        }
-
-        // Reset speech tracking if no speech has been detected for a long time
-        if self.speech_onset_frames > self.decay_slope_window_frames * 10 {
-            self.speech_active = false;
-            self.speech_onset_frames = 0;
-        }
     }
 }
 

@@ -1,0 +1,427 @@
+/* ============================================================================
+   ROOT + GLOBAL
+   ============================================================================ */
+
+.root,
+.app-root {
+    background-color: #0f172a;
+    font-family: "Roboto", sans-serif;
+    color: #e2e8f0;
+    min-width: 900px;
+    min-height: 550px;
+}
+
+.main-view {
+    background-color: #0f172a;
+    child-left: 24px;
+    child-right: 24px;
+    child-top: 24px;
+    child-bottom: 24px;
+}
+
+.columns-container {
+    col-between: 40px;
+    width: 1s;
+}
+
+.dials-container {
+    col-between: 40px;
+    child-space: 1s;
+    left: 100%;
+    top: -80px;
+}
+
+.footer-buttons {
+    col-between: 10px;
+    child-space: 1s;
+}
+
+.fill-width {
+    width: 1s;
+}
+
+.fill-height {
+    height: 1s;
+}
+
+.fill-both {
+    width: 1s;
+    height: 1s;
+}
+
+.child-space-stretch {
+    child-space: 1s;
+}
+
+.header-title-stack {
+    width: 1s;
+}
+
+.input-hidden {
+    opacity: 0%;
+}
+
+.output-accent {
+    color: #f97316;
+}
+
+/* ============================================================================
+   HEADER
+   ============================================================================ */
+
+.header {
+    height: 68px;
+    background-color: #1e293b;
+    border-bottom: 1px solid #334155;
+    padding-left: 24px;
+    padding-right: 24px;
+    child-space: 1s;
+    text-align: left;
+}
+
+.header-title {
+    font-size: 22;
+    font-weight: bold;
+    color: #ffffff;
+    top: -10px;
+}
+.header-sub {
+    font-size: 14;
+    color: #94a3b8;
+    top: 2px;
+    bottom: -10px;
+}
+.header-title,
+.header-sub {
+    width: 1s;
+    text-align: left;
+    left: -150px;
+}
+
+/* ============================================================================
+   MODE BUTTONS
+   ============================================================================ */
+
+.mode-group {
+    col-between: 4px;
+    width: auto;
+    text-align: right;
+}
+
+.mode-button,
+.mode-button-active {
+    border-radius: 4px;
+    font-size: 14;
+    height: 28px;
+    padding-left: 12px;
+    padding-right: 12px;
+    border: 1px solid #334155;
+    child-space: 1s;
+}
+
+.mode-button {
+    background-color: #0f172a;
+    color: #94a3b8;
+}
+
+.mode-button-active {
+    background-color: #1d4ed8;
+    border-color: #3b82f6;
+    color: #ffffff;
+}
+
+/* ============================================================================
+   COLUMNS
+   ============================================================================ */
+
+.column-header {
+    font-size: 16;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    height: 24px;
+    margin-bottom: 16px;
+}
+
+.col-levels {
+    color: #94a3b8;
+}
+
+.col-clean {
+    color: #60a5fa;
+}
+
+.col-polish {
+    color: #60a5fa;
+}
+
+.levels-column {
+    width: 180px;
+    border-right: 1px solid #1e293b;
+    padding-right: 20px;
+}
+
+.clean-column,
+.polish-column {
+    min-width: 200px;
+    width: 1s;
+}
+
+.macro-column {
+}
+
+/* ============================================================================
+   METERS
+   ============================================================================ */
+
+.meter-grid {
+    height: 260px;
+    col-between: 6px;
+}
+
+.meter-col {
+    width: 44px;
+}
+
+.meter-track {
+    width: 12px;
+}
+
+.meter-pair {
+    col-between: 2px;
+    height: 1s;
+}
+
+.meter-label {
+    font-size: 14;
+    color: #64748b;
+    text-align: center;
+    bottom: 10px;
+}
+
+.noise-floor-row {
+    height: 20px;
+    margin-top: 18px;
+}
+
+.noise-floor-leds {
+    width: 1s;
+    height: 14px;
+}
+
+.spacer {
+    height: 18px;
+}
+
+/* ============================================================================
+   SLIDERS
+   ============================================================================ */
+
+.slider-container {
+    height: 56px;
+    margin-bottom: 6px;
+}
+
+.slider-header {
+    height: 20px;
+}
+
+.slider-label {
+    font-size: 16;
+    color: #94a3b8;
+    top: 0px;
+}
+
+.slider-value {
+    font-size: 16;
+    color: #f1f5f9;
+    font-weight: bold;
+    text-align: right;
+    top: 2px;
+    width: 60px;
+}
+
+.slider-visual {
+    height: 30px;
+}
+
+/* ============================================================================
+   SIMPLE MODE DIALS
+   ============================================================================ */
+
+.dial-container {
+    width: 180px;
+    height: 200px;
+}
+
+.dial-label {
+    font-size: 18;
+    color: #94a3b8;
+    text-align: center;
+    margin-bottom: 16px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.dial-visual {
+    width: 150px;
+    height: 150px;
+}
+.dial-value {
+    font-size: 18;
+    color: #ffffff;
+    text-align: center;
+    font-weight: bold;
+    top: -18px;
+}
+
+/* ============================================================================
+   TOGGLE (ADVANCED MODE)
+   ============================================================================ */
+
+.toggle-row {
+    height: 30px;
+    margin-bottom: 16px;
+    margin-top: 6px;
+    child-space: 1s;
+}
+
+.toggle-label {
+    font-size: 16;
+    color: #94a3b8;
+    right: 12px;
+}
+
+.mode-toggle,
+.mode-toggle-active {
+    border-radius: 4px;
+    font-size: 14;
+    height: 26px;
+    width: 90px;
+    padding-left: 12px;
+    padding-right: 12px;
+    child-space: 1s;
+}
+
+.mode-toggle {
+    background-color: #0f172a;
+    border: 1px solid #334155;
+    color: #94a3b8;
+}
+
+.mode-toggle-active {
+    background-color: #f97316;
+    border: 1px solid #fb923c;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+/* ============================================================================
+   DROPDOWN (OUTPUT PRESET)
+   ============================================================================ */
+
+.dropdown-row {
+    height: 32px;
+    margin-top: 10px;
+    child-space: 1s;
+}
+
+.dropdown-label {
+    font-size: 16;
+    color: #94a3b8;
+    margin-right: 12px;
+}
+
+dropdown.dropdown-box {
+    width: 180px;
+    height: 28px;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    left: 20px;
+}
+
+dropdown.dropdown-box .title {
+    background-color: #0f172a;
+    border: none;
+    border-radius: 4px;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+.dropdown-selected {
+    color: #ffffff;
+    font-size: 16;
+}
+
+dropdown.dropdown-box popup {
+    background-color: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 4px;
+    top: -110px;
+}
+
+.dropdown-options {
+    background-color: #0f172a;
+}
+
+.dropdown-option {
+    background-color: #0f172a;
+    color: #cbd5e1;
+    font-size: 16;
+    padding-left: 8px;
+    padding-right: 8px;
+    height: 26px;
+    child-top: 5px;
+    width: 180px;
+}
+
+.dropdown-option:hover {
+    background-color: #1e293b;
+    color: #ffffff;
+}
+
+/* ============================================================================
+   FOOTER
+   ============================================================================ */
+
+.footer {
+    height: 40px;
+    background-color: #0f172a;
+    border-top: 1px solid #1e293b;
+    padding-left: 24px;
+    padding-right: 24px;
+    child-space: 1s;
+}
+
+.footer-button {
+    background-color: #1e293b;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+    border-radius: 4px;
+    font-size: 14;
+    height: 28px;
+    padding-left: 12px;
+    padding-right: 12px;
+    child-space: 1s;
+}
+
+.footer-button:hover {
+    background-color: #334155;
+}
+
+.reset-button {
+    background-color: #450a0a;
+    border-color: #991b1b;
+    color: #fecaca;
+}
+
+.reset-button:hover {
+    background-color: #7f1d1d;
+    color: #ffffff;
+}
+
+.copyright-text {
+    font-size: 10;
+    color: #64748b;
+}

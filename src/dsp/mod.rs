@@ -29,25 +29,30 @@
 //! - [`utils`] - Shared DSP utilities (see ARCHITECTURE.md)
 
 pub mod biquad;
+pub mod breath_reducer;
 pub mod clarity;
 pub mod compressor;
 pub mod control_slew;
 pub mod de_esser;
 pub mod denoiser;
+pub mod deverber;
 pub mod dsp_denoiser;
 pub mod dtln_denoiser;
-pub mod deverber;
 pub mod early_reflection;
+pub mod envelope;
 pub mod limiter;
-pub mod ml_denoise;
+pub mod pink_ref_bias;
+pub mod plosive_softener;
 pub mod profile_analyzer;
 pub mod proximity;
 pub mod spectral_guardrails;
 pub mod speech_confidence;
 pub mod speech_expander;
+pub mod speech_hpf;
 pub mod utils;
 
 pub use biquad::Biquad;
+pub use breath_reducer::BreathReducer;
 pub use clarity::{Clarity, ClarityDetector};
 pub use compressor::LinkedCompressor;
 pub use control_slew::SpectralControlLimiters;
@@ -55,12 +60,16 @@ pub use de_esser::{DeEsserBand, DeEsserDetector};
 pub use denoiser::{DenoiseConfig, StereoStreamingDenoiser};
 pub use deverber::StreamingDeverber;
 pub use early_reflection::EarlyReflectionSuppressor;
+pub use envelope::VoiceEnvelopeTracker;
 pub use limiter::LinkedLimiter;
+pub use pink_ref_bias::PinkRefBias;
+pub use plosive_softener::PlosiveSoftener;
 pub use profile_analyzer::ProfileAnalyzer;
 pub use proximity::Proximity;
 pub use spectral_guardrails::SpectralGuardrails;
 pub use speech_confidence::SpeechConfidenceEstimator;
 pub use speech_expander::SpeechExpander;
+pub use speech_hpf::SpeechHpf;
 
 /// Lifecycle state model for DSP modules.
 /// Ensures predictable behavior during training, active processing, and bypassing.
@@ -78,34 +87,9 @@ pub enum Lifecycle {
     Bypassed,
 }
 
-pub struct PreviewDelay {
-    buf: Vec<f32>,
-    idx: usize,
-}
-
-impl PreviewDelay {
-    pub fn new(len: usize) -> Self {
-        assert!(len > 0, "preview delay length must be > 0");
-        Self {
-            buf: vec![0.0; len],
-            idx: 0,
-        }
-    }
-
-    pub fn push(&mut self, sample: f32) -> f32 {
-        let out = self.buf[self.idx];
-        self.buf[self.idx] = sample;
-        self.idx = (self.idx + 1) % self.buf.len();
-        out
-    }
-}
-
 pub struct RestorationChain {
     pub safety_hpf: Biquad,
     pub deverber: StreamingDeverber,
-    pub preview_delay_denoise: PreviewDelay,
-    pub preview_delay_deverb: PreviewDelay,
-    pub preview_delay_post_deverb: PreviewDelay,
 }
 
 pub struct ShapingChain {
@@ -119,6 +103,7 @@ pub struct DynamicsChain {
 
 /// Channel processor containing all DSP effects for one audio channel
 pub struct ChannelProcessor {
+    pub envelope_tracker: VoiceEnvelopeTracker,
     pub restoration_chain: RestorationChain,
     pub shaping_chain: ShapingChain,
     pub dynamics_chain: DynamicsChain,
@@ -132,13 +117,12 @@ impl ChannelProcessor {
         let mut safety = Biquad::new();
         safety.update_hpf(80.0, 0.707, sr);
         Self {
+            envelope_tracker: VoiceEnvelopeTracker::new(sr),
             restoration_chain: RestorationChain {
                 safety_hpf: safety,
                 deverber: StreamingDeverber::new(win, hop),
-                preview_delay_denoise: PreviewDelay::new(win),
-                preview_delay_deverb: PreviewDelay::new(win),
-                preview_delay_post_deverb: PreviewDelay::new(win),
             },
+
             shaping_chain: ShapingChain {
                 proximity: Proximity::new(sr),
                 clarity: Clarity::new(sr),

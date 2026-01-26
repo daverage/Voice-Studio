@@ -1,13 +1,19 @@
 //! Streaming Deverber (Late Reflection Suppression)
 //!
-//! # RESPONSIBILITY BOUNDARY: Late Reflections Only
+//! Reduces late reverb tail and diffuse room decay (>50ms) to improve speech
+//! clarity and reduce the perception of distance. Uses WOLA (Weighted Overlap-Add)
+//! processing to maintain audio quality while removing late reflections.
 //!
-//! This module handles LATE reverb tail and diffuse room decay (>50ms):
-//! - Room ambience and "wash"
-//! - Diffuse tail that makes speech sound distant
-//! - Long decay that reduces intelligibility
+//! # Purpose
+//! Improves speech intelligibility by reducing late reverb components that
+//! contribute to a sense of distance and reduce clarity, while preserving
+//! the direct signal and early reflections that contribute to presence.
 //!
-//! This module DOES NOT handle:
+//! # Design Notes
+//! - Handles late reverb tail and diffuse room decay (>50ms)
+//! - Uses WOLA processing for high-quality results
+//! - Preserves direct signal and early reflections
+//! - Works in series with early reflection suppression
 //! - Short-lag reflections (0-20ms) - owned by `EarlyReflectionSuppressor`
 //! - Desk/wall coloration - owned by `EarlyReflectionSuppressor`
 //! - Distinct flutter echoes - not modeled
@@ -40,8 +46,8 @@
 //! - **Bypassed**: Passes audio through.
 
 use crate::dsp::utils::{
-    estimate_f0_autocorr, lerp, make_sqrt_hann_window, max3, smoothstep, BYPASS_AMOUNT_EPS,
-    MAG_FLOOR,
+    aggressive_tail, estimate_f0_autocorr, lerp, make_sqrt_hann_window, max3, smoothstep,
+    BYPASS_AMOUNT_EPS, MAG_FLOOR,
 };
 use ringbuf::{Consumer, Producer, RingBuffer};
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
@@ -104,9 +110,7 @@ const FLOOR_MASK_MAX: f32 = 0.60;
 // Increasing: higher floor when early hold is strong; decreasing: lower floor.
 const FLOOR_HOLD_MIN: f32 = 0.10;
 const FLOOR_HOLD_MAX: f32 = 0.55;
-// Floor clamp range.
-// Increasing min: less attenuation; decreasing min: more attenuation.
-const FLOOR_CLAMP_MIN: f32 = 0.08;
+// Floor clamp max (floor clamp min is computed dynamically based on speech confidence).
 // Increasing max: less attenuation cap; decreasing max: tighter cap.
 const FLOOR_CLAMP_MAX: f32 = 0.92;
 // Gain smoothing attack/release for mask updates.
@@ -209,9 +213,25 @@ impl StreamingDeverber {
         }
     }
 
-    pub fn process_sample(&mut self, input: f32, amount: f32, sample_rate: f32) -> f32 {
+    pub fn process_sample(
+        &mut self,
+        input: f32,
+        amount: f32,
+        sample_rate: f32,
+        speech_confidence: f32,
+        clarity_amount: f32,
+        proximity_amount: f32,
+    ) -> f32 {
         if amount <= BYPASS_AMOUNT_EPS {
             return input;
+        }
+
+        // Apply aggressive_tail curve to amount
+        let mut strength = aggressive_tail(amount);
+
+        // Inter-module clamp: reduce strength by 25% if clarity > 0.6
+        if clarity_amount > 0.6 {
+            strength *= 0.75;
         }
 
         let _ = self.input_producer.push(input);
@@ -232,7 +252,13 @@ impl StreamingDeverber {
             // So we can reuse that if the detector exposed it, but it computes gains.
 
             // Let's run analysis
-            let gains = self.detector.analyze(&self.frame_in, amount, sample_rate); // This mutates detector
+            let gains = self.detector.analyze(
+                &self.frame_in,
+                strength,
+                sample_rate,
+                speech_confidence,
+                proximity_amount,
+            ); // This mutates detector
 
             // Now we do the application WOLA
 
@@ -285,6 +311,19 @@ impl StreamingDeverber {
         }
 
         self.output_consumer.pop().unwrap_or(0.0)
+    }
+
+    pub fn reset(&mut self) {
+        self.detector.reset();
+        self.overlap.fill(0.0);
+        self.ola_norm.fill(0.0);
+        while self.input_consumer.pop().is_some() {}
+        while self.output_consumer.pop().is_some() {}
+
+        // Prime output with zeros again
+        for _ in 0..self.win_size {
+            let _ = self.output_producer.push(0.0);
+        }
     }
 }
 
@@ -339,7 +378,14 @@ impl StereoDeverberDetector {
         }
     }
 
-    pub fn analyze(&mut self, mono: &[f32], strength: f32, sample_rate: f32) -> &[f32] {
+    pub fn analyze(
+        &mut self,
+        mono: &[f32],
+        strength: f32,
+        sample_rate: f32,
+        speech_confidence: f32,
+        proximity_amount: f32,
+    ) -> &[f32] {
         let n = self.win_size;
         let nyq = n / 2;
         let sr = sample_rate;
@@ -350,12 +396,32 @@ impl StereoDeverberDetector {
         debug_assert_eq!(self.frame_time.len(), n, "Frame time buffer size mismatch");
         debug_assert_eq!(self.window.len(), n, "Window buffer size mismatch");
         debug_assert_eq!(self.mag.len(), nyq + 1, "Magnitude buffer size mismatch");
-        debug_assert_eq!(self.prev_mag.len(), nyq + 1, "Previous magnitude buffer size mismatch");
-        debug_assert_eq!(self.late_env.len(), nyq + 1, "Late envelope buffer size mismatch");
-        debug_assert_eq!(self.early_hold.len(), nyq + 1, "Early hold buffer size mismatch");
+        debug_assert_eq!(
+            self.prev_mag.len(),
+            nyq + 1,
+            "Previous magnitude buffer size mismatch"
+        );
+        debug_assert_eq!(
+            self.late_env.len(),
+            nyq + 1,
+            "Late envelope buffer size mismatch"
+        );
+        debug_assert_eq!(
+            self.early_hold.len(),
+            nyq + 1,
+            "Early hold buffer size mismatch"
+        );
         debug_assert_eq!(self.masker.len(), nyq + 1, "Masker buffer size mismatch");
-        debug_assert_eq!(self.gain_mask.len(), nyq + 1, "Gain mask buffer size mismatch");
-        debug_assert_eq!(self.gain_smooth.len(), nyq + 1, "Gain smooth buffer size mismatch");
+        debug_assert_eq!(
+            self.gain_mask.len(),
+            nyq + 1,
+            "Gain mask buffer size mismatch"
+        );
+        debug_assert_eq!(
+            self.gain_smooth.len(),
+            nyq + 1,
+            "Gain smooth buffer size mismatch"
+        );
 
         // Window + FFT
         for i in 0..n {
@@ -393,6 +459,13 @@ impl StereoDeverberDetector {
         let bin_width = sr / n as f32;
         let late_k = strength;
 
+        // Speech-aware floor clamping
+        let floor_clamp_min = if speech_confidence > 0.5 {
+            0.08 // During speech: less aggressive
+        } else {
+            0.04 // During silence: more aggressive
+        };
+
         let mut gain_sum: f32 = 0.0;
         let mut min_gain: f32 = 1.0;
         for i in 0..=nyq {
@@ -402,7 +475,15 @@ impl StereoDeverberDetector {
             let freq = i as f32 * bin_width;
             let frac = (freq / (sr * NYQUIST_FRAC)).clamp(0.0, 1.0);
 
-            let decay = lerp(LATE_DECAY_LOW, LATE_DECAY_HIGH, frac);
+            // Base decay
+            let mut decay = lerp(LATE_DECAY_LOW, LATE_DECAY_HIGH, frac);
+
+            // Inter-module clamp: reduce HF decay by 20% if proximity > 0.6
+            // This means decay coefficient increases (slower decay = less deverb)
+            if proximity_amount > 0.6 && frac > 0.5 {
+                // Scale decay back toward 1.0 (no decay) by 20%
+                decay = decay + (1.0 - decay) * 0.2;
+            }
             let rise = (mag - prev).max(0.0);
             let rise_gate = smoothstep(0.0, prev * RISE_GATE_SCALE + RISE_GATE_EPS, rise);
 
@@ -437,7 +518,7 @@ impl StereoDeverberDetector {
                     smoothstep(0.0, mag * 0.25 + RISE_GATE_EPS, self.early_hold[i]),
                 ),
             )
-            .clamp(FLOOR_CLAMP_MIN, FLOOR_CLAMP_MAX);
+            .clamp(floor_clamp_min, FLOOR_CLAMP_MAX);
 
             gain = gain.max(floor);
 
@@ -518,5 +599,15 @@ impl StereoDeverberDetector {
 
         let protect = lerp(HARMONIC_PROTECT_MIN, HARMONIC_PROTECT_MAX, strength);
         gain.max(lerp(gain, protect, near))
+    }
+
+    pub fn reset(&mut self) {
+        self.mag.fill(0.0);
+        self.prev_mag.fill(0.0);
+        self.late_env.fill(0.0);
+        self.early_hold.fill(0.0);
+        self.masker.fill(0.0);
+        self.gain_mask.fill(1.0);
+        self.gain_smooth.fill(1.0);
     }
 }

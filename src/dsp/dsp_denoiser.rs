@@ -1,13 +1,19 @@
 //! DSP Denoiser (Wiener + ML Advisor)
 //!
-//! # Perceptual Contract
-//! - **Target Source**: Spoken voice (podcast, voice-over, meeting). Not for music or singing.
-//! - **Intended Effect**: Reduce stationary background noise (hiss, hum, fan noise) while preserving voice timbre.
-//! - **Failure Modes**:
-//!   - "Musical noise" / "space monkeys" if reduction is too aggressive.
-//!   - Voice thinning if noise floor estimation tracks speech.
-//!   - High-frequency pumping if release time is too fast.
-//! - **Will Not Do**:
+//! Traditional spectral denoiser using Wiener filtering with optional ML-based
+//! advisory for improved speech probability estimation. Reduces stationary
+//! background noise while preserving voice timbre and intelligibility.
+//!
+//! # Purpose
+//! Reduce stationary background noise (hiss, hum, fan noise) while preserving
+//! voice timbre and maintaining speech intelligibility. Optionally enhanced
+//! with ML-based advisory for more intelligent noise reduction.
+//!
+//! # Design Notes
+//! - Uses traditional Wiener filtering approach
+//! - Optional ML advisor for improved speech probability estimation
+//! - Focuses on stationary noise reduction
+//! - Preserves voice characteristics and intelligibility
 //!   - Remove non-stationary noise like dog barks, sirens, or keyboard clicks.
 //!   - De-clip or de-crackle.
 //!
@@ -48,11 +54,9 @@
 //! - Speech is characterized by harmonic structure (voiced) or broadband high-frequency transients (unvoiced).
 //! - Impulse noise and non-stationary transients are NOT modeled.
 
-#[cfg(feature = "ml")]
-use crate::dsp::ml_denoise::MlDenoiseEngine;
 use crate::dsp::utils::{
-    bell, db_to_gain, estimate_f0_autocorr, frame_rms, lerp, make_sqrt_hann_window, smoothstep,
-    BYPASS_AMOUNT_EPS, MAG_FLOOR,
+    bell, db_to_gain, estimate_f0_autocorr, frame_rms, lerp, make_sqrt_hann_window,
+    perceptual_curve, smoothstep, BYPASS_AMOUNT_EPS, MAG_FLOOR,
 };
 use ringbuf::{Consumer, Producer, RingBuffer};
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
@@ -66,8 +70,6 @@ use crate::dsp::denoiser::StereoDenoiser;
 const WIN_SIZE_MIN: usize = 64;
 // Ring buffer capacity multiplier relative to window size.
 const RINGBUF_CAP_MULT: usize = 4;
-// Nyquist fraction used for normalization (fs/2).
-const NYQUIST_FRAC: f32 = 0.5;
 // Coarse FFT window divisor.
 const COARSE_WIN_DIV: usize = 2;
 // Minimum coarse FFT size.
@@ -78,6 +80,8 @@ const NOISE_FLOOR_INIT: f32 = 1e-5;
 const SAMPLE_RATE_MIN: f32 = 8000.0;
 // Amount threshold for enabling hum removal in analysis.
 const HUM_REMOVAL_AMOUNT_THRESH: f32 = 0.05;
+const DENOISE_STRENGTH_MULT: f32 = 4.0;
+const MAX_DENOISE_AMOUNT: f32 = 4.0;
 // Hum removal main-bin attenuation.
 const HUM_REMOVAL_MAIN_SCALE: f32 = 0.1;
 // Hum removal side-bin attenuation.
@@ -129,9 +133,6 @@ const THRESH_SENS_SCALE: f32 = 5.0;
 const SPEECH_THRESH_SCALE: f32 = 1.25;
 // Power for raw gain depth shaping.
 const RAW_GAIN_POWER: f32 = 2.0;
-// Strength shaping range.
-const STRENGTH_MIN: f32 = 1.0;
-const STRENGTH_MAX: f32 = 3.0;
 // Psychoacoustic floor shaping.
 const PSYCHO_FLOOR_BASE: f32 = 0.25;
 const PSYCHO_FLOOR_RANGE: f32 = 0.65;
@@ -156,12 +157,7 @@ const HARMONIC_F0_MIN_HZ: f32 = 50.0;
 const HARMONIC_F0_MAX_HZ: f32 = 450.0;
 // Harmonic protection max frequency (Hz).
 const HARMONIC_MAX_HZ: f32 = 8000.0;
-// Harmonic protection base/range.
-const HARMONIC_PROTECT_BASE: f32 = 0.55;
-const HARMONIC_PROTECT_MAX: f32 = 0.35;  // Fixed: this was missing
-const HARMONIC_PROTECT_RANGE: f32 = 0.40;
 // Harmonic allow reduction scale.
-const HARMONIC_ALLOW_SCALE: f32 = 0.65;
 const HARMONIC_ALLOW_MIN: f32 = 0.25;
 const HARMONIC_ALLOW_MAX: f32 = 1.0;
 // Harmonic minimum gain clamp bounds.
@@ -190,6 +186,14 @@ const ENERGY_GATE_MIN: f32 = 0.003;
 const ENERGY_GATE_MAX: f32 = 0.02;
 // HF ratio band split.
 const HF_SPLIT_FRAC: f32 = 0.25;
+/// Fraction of Nyquist where HF overrides activate
+const HF_OVERRIDE_FRAC: f32 = 0.25;
+/// Speech confidence threshold to drop HF floors
+const HF_SILENCE_CONF_THRESHOLD: f32 = 0.2;
+/// Speech confidence threshold to relax HF release limits
+const HF_RELEASE_CONF_THRESHOLD: f32 = 0.3;
+/// Minimum HF gain floor when in confirmed silence
+const HF_SILENCE_MIN_GAIN: f32 = 0.02;
 // Max number of spectral peaks for masker.
 const MASKER_MAX_PEAKS: usize = 64;
 // Masker spread radius (bins).
@@ -205,6 +209,42 @@ const OLA_NORM_EPS: f32 = 1e-6;
 const DD_ALPHA: f32 = 0.98;
 const SNR_EPS: f32 = 1e-10;
 
+// ----------------------------
+// SOTA DSP EXTENSIONS
+// ----------------------------
+
+// Inter-frame coherence
+const COH_EPS: f32 = 1e-12;
+const COH_WEIGHT: f32 = 0.35;
+
+// Transient protection (unvoiced consonants)
+const TRANSIENT_D_RMS_MIN: f32 = 0.0025;
+const TRANSIENT_D_RMS_MAX: f32 = 0.015;
+const TRANSIENT_HF_MIN: f32 = 0.18;
+const TRANSIENT_HOLD_FRAMES: i32 = 2;
+
+// MMSE-LSA numerical guard
+const MMSE_EPS: f32 = 1e-12;
+
+fn expint_e1(x: f32) -> f32 {
+    let x = x.max(MMSE_EPS);
+    if x < 1.0 {
+        let gamma = 0.57721566_f32;
+        (-gamma - x.ln()) + x - 0.25 * x * x
+    } else {
+        (-x).exp() / x
+    }
+}
+
+fn mmse_lsa_gain(xi: f32, gamma: f32) -> f32 {
+    let xi = xi.max(0.0);
+    let gamma = gamma.max(0.0);
+    let v = gamma * xi / (1.0 + xi + MMSE_EPS);
+    let e1 = expint_e1(v);
+    let g = (xi / (1.0 + xi + MMSE_EPS)) * (0.5 * e1).exp();
+    g.clamp(0.0, 1.0)
+}
+
 /// Configuration for the denoiser
 #[derive(Debug, Clone, Copy)]
 pub struct DenoiseConfig {
@@ -212,8 +252,8 @@ pub struct DenoiseConfig {
     pub sensitivity: f32,
     pub tone: f32,
     pub sample_rate: f32,
-    pub use_ml: bool,
-    pub use_dtln: bool, // Toggle to switch between DSP and DTLN
+    pub use_dtln: bool,         // Toggle to switch between DSP and DTLN
+    pub speech_confidence: f32, // Speech confidence for adaptive behavior
 }
 
 /// DSP-based denoiser implementation
@@ -295,6 +335,7 @@ struct DspDenoiserDetector {
     scratch: Vec<Complex<f32>>,
     mag: Vec<f32>,
     prev_mag: Vec<f32>,
+    prev_spec: Vec<Complex<f32>>,
 
     fft_coarse: Arc<dyn Fft<f32>>,
     win_size_coarse: usize,
@@ -312,15 +353,8 @@ struct DspDenoiserDetector {
     f0_scratch: Vec<f32>,
 
     noise_confidence: f32,
-
-    // ML advisor (behavior only)
-    #[cfg(feature = "ml")]
-    ml: Option<MlDenoiseEngine>,
-    #[cfg(feature = "ml")]
-    ml_init_attempted: bool,
-
-    // ML data always exists (for consistent API regardless of feature)
-    ml_mask: Vec<f32>,
+    prev_rms: f32,
+    transient_hold: i32,
 }
 
 impl DspDenoiserDetector {
@@ -346,6 +380,7 @@ impl DspDenoiserDetector {
             scratch: vec![Complex::new(0.0, 0.0); win_size],
             mag: vec![0.0; nyq + 1],
             prev_mag: vec![0.0; nyq + 1],
+            prev_spec: vec![Complex::new(0.0, 0.0); nyq + 1],
 
             fft_coarse,
             win_size_coarse,
@@ -362,13 +397,8 @@ impl DspDenoiserDetector {
             peaks_buf: Vec::with_capacity(MASKER_MAX_PEAKS),
             f0_scratch: Vec::with_capacity(win_size),
             noise_confidence: 1.0,
-
-            ml_mask: vec![0.0; nyq + 1],
-
-            #[cfg(feature = "ml")]
-            ml: MlDenoiseEngine::new().ok(),
-            #[cfg(feature = "ml")]
-            ml_init_attempted: false,
+            prev_rms: 0.0,
+            transient_hold: 0,
         }
     }
 
@@ -380,15 +410,41 @@ impl DspDenoiserDetector {
         // Realtime safety assertion: ensure buffer sizes match expectations
         debug_assert_eq!(mono.len(), n, "Input frame size mismatch");
         debug_assert_eq!(self.mag.len(), nyq + 1, "Magnitude buffer size mismatch");
-        debug_assert_eq!(self.prev_mag.len(), nyq + 1, "Previous magnitude buffer size mismatch");
-        debug_assert_eq!(self.noise_floor.len(), nyq + 1, "Noise floor buffer size mismatch");
-        debug_assert_eq!(self.prev_gains.len(), nyq + 1, "Previous gains buffer size mismatch");
+        debug_assert_eq!(
+            self.prev_mag.len(),
+            nyq + 1,
+            "Previous magnitude buffer size mismatch"
+        );
+        debug_assert_eq!(
+            self.noise_floor.len(),
+            nyq + 1,
+            "Noise floor buffer size mismatch"
+        );
+        debug_assert_eq!(
+            self.prev_gains.len(),
+            nyq + 1,
+            "Previous gains buffer size mismatch"
+        );
         debug_assert_eq!(self.gain_buf.len(), nyq + 1, "Gain buffer size mismatch");
-        debug_assert_eq!(self.masker_buf.len(), nyq + 1, "Masker buffer size mismatch");
-        debug_assert_eq!(self.frame_time.len(), n, "Time domain frame buffer size mismatch");
-        debug_assert_eq!(self.ml_mask.len(), nyq + 1, "ML mask buffer size mismatch");
+        debug_assert_eq!(
+            self.masker_buf.len(),
+            nyq + 1,
+            "Masker buffer size mismatch"
+        );
+        debug_assert_eq!(
+            self.frame_time.len(),
+            n,
+            "Time domain frame buffer size mismatch"
+        );
+        debug_assert_eq!(
+            self.prev_spec.len(),
+            nyq + 1,
+            "Previous spectrum buffer size mismatch"
+        );
 
-        let amt = cfg.amount.clamp(0.0, 1.0);
+        // Apply perceptual curve to amount before scaling
+        let curved_amount = perceptual_curve(cfg.amount.clamp(0.0, 1.0));
+        let amt = (curved_amount * DENOISE_STRENGTH_MULT).clamp(0.0, MAX_DENOISE_AMOUNT);
         let sensitivity = cfg.sensitivity.clamp(0.0, 1.0);
         let tone = cfg.tone.clamp(0.0, 1.0);
 
@@ -429,53 +485,19 @@ impl DspDenoiserDetector {
         // 4) DSP speech presence probability + voiced/unvoiced + f0
         let (dsp_speech_prob, voiced_prob, f0_hz) = self.estimate_speech_and_f0(sr);
 
-        // 4b) ML advisor speech mask
-        let mut ml_global_spp = 0.0;
+        // Conservative SPP: Using only DSP detection
+        let global_spp = dsp_speech_prob.clamp(0.0, 1.0);
 
-        // Handle ML processing based on feature availability and configuration
-        #[cfg(feature = "ml")]
-        {
-            if cfg.use_ml {
-                if self.ml.is_none() && !self.ml_init_attempted {
-                    self.ml = MlDenoiseEngine::new().ok();
-                    self.ml_init_attempted = true;
-                }
-                if let Some(ml) = self.ml.as_mut() {
-                    // NOTE: ML backend applies its own Hann window internally. (Patch 6)
-                    // We intentionally pass raw time-domain samples here.
-                    match ml.process_frame(&self.frame_time, sr, &mut self.ml_mask) {
-                        Ok(()) => {
-                            ml_global_spp = self.ml_mask.iter().copied().fold(0.0, f32::max);
-                        }
-                        Err(_) => {
-                            // Inference failed, clear mask defensively
-                            for v in &mut self.ml_mask {
-                                *v = 0.0;
-                            }
-                        }
-                    }
-                } else {
-                    // Engine missing: clear mask
-                    for v in &mut self.ml_mask {
-                        *v = 0.0;
-                    }
-                }
-            } else {
-                // Explicitly clear ML mask when ML is disabled or unavailable (Patch 4)
-                for v in &mut self.ml_mask {
-                    *v = 0.0;
-                }
-            }
+        // Transient detection
+        let rms = frame_rms(&self.frame_time);
+        let drms = (rms - self.prev_rms).max(0.0);
+        self.prev_rms = rms;
+        let unvoiced = voiced_prob <= VOICED_PROB_MIN;
+        if smoothstep(TRANSIENT_D_RMS_MIN, TRANSIENT_D_RMS_MAX, drms) > 0.5 && unvoiced {
+            self.transient_hold = TRANSIENT_HOLD_FRAMES;
+        } else if self.transient_hold > 0 {
+            self.transient_hold -= 1;
         }
-        #[cfg(not(feature = "ml"))]
-        {
-            // No ML compiled in, mask must be zero
-            for v in &mut self.ml_mask {
-                *v = 0.0;
-            }
-        }
-        // Conservative SPP fusion: ML rescues DSP uncertainty
-        let global_spp = dsp_speech_prob.max(ml_global_spp * 0.85).clamp(0.0, 1.0);
 
         // 5) Update noise floor
         let startup_mode =
@@ -522,23 +544,22 @@ impl DspDenoiserDetector {
         let voiced = voiced_prob > VOICED_PROB_MIN;
 
         for i in 0..=nyq {
-            let mag = self.mag[i];
+            let mag_p = self.mag[i];
             let nf = self.noise_floor[i];
             let freq_fraction = i as f32 / nyq.max(1) as f32; // Guarded Nyquist division (Patch 7)
 
-            // a-posteriori SNR: gamma = mag² / (noise_floor² + eps)
-            let gamma = (mag * mag) / (nf * nf + SNR_EPS);
+            let noise_p = nf * nf + SNR_EPS;
+            let gamma = mag_p / noise_p;
 
             // a-priori SNR using decision-directed recursion (Ephraim & Malah)
             // xi = alpha * (prev_gain² * prev_mag² / (noise_floor² + eps)) + (1 - alpha) * max(gamma - 1, 0)
             let pg = self.prev_gains[i];
             let pm = self.prev_mag[i];
-            let xi_hist = (pg * pg * pm * pm) / (nf * nf + SNR_EPS);
+            let xi_hist = (pg * pg) * (pm / noise_p);
             let xi_curr = (gamma - 1.0).max(0.0);
             let xi = DD_ALPHA * xi_hist + (1.0 - DD_ALPHA) * xi_curr;
 
-            // Wiener gain: G = xi / (1 + xi)
-            let mut wiener_gain = xi / (1.0 + xi);
+            let g_lsa = mmse_lsa_gain(xi, gamma);
 
             // Tone bias logic
             let bias = if tone < TONE_SPLIT {
@@ -559,23 +580,31 @@ impl DspDenoiserDetector {
             };
 
             // Per-bin SPP fusion
-            let spp_bin = dsp_speech_prob.max(self.ml_mask[i] * 0.85).clamp(0.0, 1.0) * band_weight;
+            let spp_bin = dsp_speech_prob.clamp(0.0, 1.0) * band_weight;
 
             // Threshold scaling using fused SPP and sensitivity
             let thresh_scale = (1.0 + sensitivity * THRESH_SENS_SCALE)
                 * bias
                 * (1.0 + SPEECH_THRESH_SCALE * spp_bin);
 
+            let mag_a = mag_p.sqrt();
             // Adjust Wiener gain by effective reduction amount and threshold
-            let gain_depth = if mag <= nf * thresh_scale {
-                let d = (mag / (nf * thresh_scale + MAG_FLOOR)).powf(RAW_GAIN_POWER);
-                1.0 - (effective_amt * (1.0 - d))
+            let gain_depth = if mag_a <= nf * thresh_scale {
+                let d = (mag_a / (nf * thresh_scale + MAG_FLOOR)).powf(RAW_GAIN_POWER);
+                1.0 - effective_amt * (1.0 - d)
             } else {
                 1.0
             };
 
-            wiener_gain =
-                wiener_gain.powf(lerp(STRENGTH_MIN, STRENGTH_MAX, effective_amt)) * gain_depth;
+            let mut gain = g_lsa * gain_depth;
+
+            // Inter-frame coherence
+            let x = self.scratch[i];
+            let xp = self.prev_spec[i];
+            let coh =
+                ((x * xp.conj()).norm().sqrt()) / (x.norm().sqrt() * xp.norm().sqrt() + COH_EPS);
+            let coh_adj = 1.0 + COH_WEIGHT * (1.0 - coh.clamp(0.0, 1.0));
+            gain = gain.powf(coh_adj);
 
             // Psychoacoustic and speech-conditioned floors
             let masker = self.masker_buf[i].max(MAG_FLOOR);
@@ -590,14 +619,39 @@ impl DspDenoiserDetector {
                 .clamp(SPEECH_FLOOR_MIN, SPEECH_FLOOR_MAX)
                 * speech_floor_scale;
 
-            let min_floor = if effective_amt <= BYPASS_AMOUNT_EPS {
+            let mut min_floor = if effective_amt <= BYPASS_AMOUNT_EPS {
                 0.0
             } else {
                 lerp(psycho_floor, speech_floor, spp_bin)
             };
 
-            self.gain_buf[i] = wiener_gain.max(min_floor);
-            self.prev_mag[i] = mag; // Store for next frame
+            if freq_fraction >= HF_OVERRIDE_FRAC
+                && cfg.speech_confidence < HF_SILENCE_CONF_THRESHOLD
+            {
+                min_floor = min_floor.min(HF_SILENCE_MIN_GAIN);
+            }
+
+            if self.transient_hold > 0 && freq_fraction >= TRANSIENT_HF_MIN {
+                gain = gain.max(0.22);
+            }
+
+            self.gain_buf[i] = gain.max(min_floor).min(1.0);
+            self.prev_mag[i] = mag_p; // Store for next frame
+        }
+
+        // 7b) Low-Frequency Harmonic Protection (≤450Hz)
+        // Prevent excessive attenuation on low-frequency voiced bins
+        if voiced && effective_amt > 0.0 {
+            let bin_width = sr / n as f32;
+            let lf_cutoff_hz = 450.0;
+            let lf_cutoff_bin = (lf_cutoff_hz / bin_width) as usize;
+
+            for i in 0..=lf_cutoff_bin.min(nyq) {
+                // Maximum 70% attenuation (minimum gain 0.3)
+                if self.gain_buf[i] < 0.3 {
+                    self.gain_buf[i] = 0.3;
+                }
+            }
         }
 
         // 8) Spectral Guardrail: Musical Noise Reduction
@@ -619,8 +673,17 @@ impl DspDenoiserDetector {
 
         // 9) Temporal Guardrail: High-Frequency Pumping Prevention
         if effective_amt > 0.0 {
-            let release_limit = lerp(RELEASE_LIMIT_MIN, RELEASE_LIMIT_MAX, global_spp);
+            let base_release_limit = lerp(RELEASE_LIMIT_MIN, RELEASE_LIMIT_MAX, global_spp);
             for i in 0..=nyq {
+                let freq_fraction = i as f32 / nyq.max(1) as f32;
+                let release_limit = if freq_fraction >= HF_OVERRIDE_FRAC
+                    && cfg.speech_confidence < HF_RELEASE_CONF_THRESHOLD
+                {
+                    1.0
+                } else {
+                    base_release_limit
+                };
+
                 if self.gain_buf[i] < self.prev_gains[i] {
                     self.gain_buf[i] = self.gain_buf[i].max(self.prev_gains[i] * release_limit);
                 }
@@ -632,6 +695,10 @@ impl DspDenoiserDetector {
         if effective_amt > 0.0 && voiced && f0_hz > HARMONIC_F0_MIN_HZ && f0_hz < HARMONIC_F0_MAX_HZ
         {
             self.apply_harmonic_protection(sr, f0_hz, global_spp, effective_amt);
+        }
+
+        for i in 0..=nyq {
+            self.prev_spec[i] = self.scratch[i];
         }
 
         &self.gain_buf
@@ -658,13 +725,10 @@ impl DspDenoiserDetector {
 
     fn estimate_speech_and_f0(&mut self, sr: f32) -> (f32, f32, f32) {
         let nyq = self.win_size / 2;
-        let mut voiced_prob = 0.0;
-        let mut f0_hz = 0.0;
 
         // Estimate periodicity and f0
-        let (periodicity, est_f0) = estimate_f0_autocorr(&self.frame_time, &mut self.f0_scratch, sr);
-        f0_hz = est_f0;
-        voiced_prob = smoothstep(PERIODICITY_MIN, PERIODICITY_MAX, periodicity);
+        let (periodicity, f0_hz) = estimate_f0_autocorr(&self.frame_time, &mut self.f0_scratch, sr);
+        let voiced_prob = smoothstep(PERIODICITY_MIN, PERIODICITY_MAX, periodicity);
 
         // Spectral flatness (measure of tonality)
         let mut sum_log = 0.0;
@@ -732,7 +796,7 @@ impl DspDenoiserDetector {
                         self.scratch[bin - 1].im * HUM_REMOVAL_MAIN_SCALE,
                     );
                 }
-                
+
                 // Reduce side bins
                 if bin > 1 {
                     self.scratch[bin - 1] = Complex::new(
@@ -748,7 +812,7 @@ impl DspDenoiserDetector {
                 }
             }
         }
-        
+
         // Also zero bins below low-cut
         let low_cut_bin = (HUM_REMOVAL_LOW_CUT_HZ / bin_width) as usize;
         for i in 1..low_cut_bin.min(self.win_size / 2) {
@@ -768,7 +832,8 @@ impl DspDenoiserDetector {
                 && m > self.mag[i + 1]
                 && m > self.mag[i - 2]
                 && m > self.mag[i + 2]
-                && m > 1e-6 // Significant peak
+                && m > 1e-6
+            // Significant peak
             {
                 self.peaks_buf.push((i, m));
                 if self.peaks_buf.len() >= MASKER_MAX_PEAKS {
@@ -778,7 +843,8 @@ impl DspDenoiserDetector {
         }
 
         // Sort peaks by magnitude (descending)
-        self.peaks_buf.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        self.peaks_buf
+            .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // For each peak, spread its influence
         let bin_width = sr / self.win_size as f32;
@@ -811,13 +877,7 @@ impl DspDenoiserDetector {
         }
     }
 
-    fn apply_harmonic_protection(
-        &mut self,
-        sr: f32,
-        f0_hz: f32,
-        global_spp: f32,
-        strength: f32,
-    ) {
+    fn apply_harmonic_protection(&mut self, sr: f32, f0_hz: f32, global_spp: f32, strength: f32) {
         if f0_hz <= HARMONIC_F0_MIN_HZ || f0_hz >= HARMONIC_F0_MAX_HZ {
             return;
         }
@@ -846,7 +906,6 @@ impl DspDenoiserDetector {
             let start_bin = harmonic_bin.saturating_sub(bw_bins as usize);
             let end_bin = (harmonic_bin + bw_bins as usize).min(nyq);
 
-            let protect_amount = lerp(HARMONIC_PROTECT_BASE, HARMONIC_PROTECT_MAX, strength);
             let allow_reduction = lerp(HARMONIC_ALLOW_MIN, HARMONIC_ALLOW_MAX, global_spp);
 
             for bin in start_bin..=end_bin {
@@ -864,22 +923,11 @@ impl DspDenoiserDetector {
     }
 }
 
-
 impl DspDenoiser {
     pub fn reset_internal(&mut self) {
         // Reset both channels
         self.chan_l.reset();
         self.chan_r.reset();
-    }
-
-    pub fn prepare_internal(&mut self, sample_rate: f32) {
-        // For DSP denoiser, we don't need to recreate anything for sample rate changes
-        // The processing adapts dynamically to sample rate
-    }
-
-    pub fn prepare(&mut self, sample_rate: f32) {
-        // For now, we don't need special preparation for sample rate changes
-        // The processing adapts dynamically to sample rate
     }
 }
 
@@ -890,11 +938,11 @@ impl StereoDenoiser for DspDenoiser {
         use crate::dsp::dsp_denoiser::DenoiseConfig;
         let temp_config = DenoiseConfig {
             amount,
-            sensitivity: 0.5, // default
-            tone: 0.5,        // default
-            sample_rate: 44100.0, // default, will be overridden by actual processing
-            use_ml: false,    // default
-            use_dtln: false,  // we're in DSP mode
+            sensitivity: 0.5,       // default
+            tone: 0.5,              // default
+            sample_rate: 44100.0,   // default, will be overridden by actual processing
+            use_dtln: false,        // we're in DSP mode
+            speech_confidence: 0.5, // default
         };
 
         self.process_sample(input_l, input_r, &temp_config)
@@ -903,11 +951,6 @@ impl StereoDenoiser for DspDenoiser {
     fn reset(&mut self) {
         // Call the actual reset method
         self.reset_internal();
-    }
-
-    fn prepare(&mut self, sample_rate: f32) {
-        // Call the actual prepare method
-        self.prepare_internal(sample_rate);
     }
 }
 
@@ -984,7 +1027,7 @@ impl StreamingDenoiserChannel {
         self.input_consumer.discard(n);
     }
 
-    fn process_frame(&mut self, gains: &[f32], sample_rate: f32) {
+    fn process_frame(&mut self, gains: &[f32], _sample_rate: f32) {
         if gains.len() != self.win_size / 2 + 1 {
             return;
         }

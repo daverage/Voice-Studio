@@ -1,5 +1,5 @@
 [package]
-name = "voice_studio"
+name = "vxcleaner"
 version = "1.0.1"
 edition = "2021"
 authors = ["Andrzej Marczewski"]
@@ -8,14 +8,18 @@ authors = ["Andrzej Marczewski"]
 crate-type = ["cdylib"]
 
 [dependencies]
+ebur128 = "0.1"
 # Plugin Framework
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
 nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 
 # Tract ML inference
-tract-core   = { version = "=0.21.13", optional = true }
-tract-tflite = { version = "=0.21.13", optional = true }
-tract-metal  = { version = "=0.21.13", optional = true }
+tract-core   = "=0.21.13"
+tract-tflite = "=0.21.13"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 # optional: for logging
 log = "0.4"
@@ -24,16 +28,9 @@ log = "0.4"
 rustfft = "6.1"
 # locking to 0.2.8 is crucial for the ringbuf syntax used
 ringbuf = "0.2.8"
+once_cell = "1.18"
 
 [features]
 default = []
 
-ml = [
-    "dep:tract-core",
-    "dep:tract-tflite",
-]
-
-gpu = [
-    "ml",
-    "dep:tract-metal",
-]
+debug = []

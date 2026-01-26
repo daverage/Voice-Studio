@@ -1,6 +1,8 @@
-use crate::macro_controller::compute_targets_from_macros;
+use crate::macro_controller;
 use crate::meters::Meters;
+use crate::presets::{DspPreset, OutputPreset};
 use crate::VoiceParams;
+
 use nih_plug::params::Param;
 use nih_plug::prelude::{GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::binding::Map;
@@ -8,190 +10,135 @@ use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
 use nih_plug_vizia::widgets::*;
+
 use std::sync::{Arc, Mutex};
+#[cfg(feature = "debug")]
+use std::time::Duration;
 
-// --- CSS STYLING ---
-const STYLE: &str = r#"
-    .main-view {
-        background-color: #0f172a; /* Slate 900 */
-        font-family: 'Roboto', sans-serif;
-        color: #e2e8f0;
-    }
+// ============================================================================
+// STYLES
+// ============================================================================
 
-    .app-root {
-        background-color: #0f172a;
-    }
+const STYLE: &str = include_str!("ui.css");
 
-    .header {
-        height: 56px;
-        background-color: #1e293b;
-        border-bottom: 1px solid #334155;
-        col-between: 12px;
-        padding-left: 20px;
-        padding-right: 20px;
-        child-top: 1s;
-        child-bottom: 1s;
-    }
-
-    .header-title {
-        font-size: 16px;
-        font-weight: bold;
-        color: #ffffff;
-    }
-
-    .header-sub {
-        font-size: 11px;
-        color: #94a3b8;
-    }
-
-    .header-controls {
-        child-space: 1s;
-        col-between: 8px;
-        padding-top: 6px;
-    }
-
-    .preview-button {
-        background-color: #0f172a;
-        border: 1px solid #334155;
-        border-radius: 6px;
-        color: #e2e8f0;
-        font-size: 11px;
-        padding-left: 10px;
-        padding-right: 10px;
-        padding-top: 6px;
-        padding-bottom: 6px;
-    }
-
-    .preview-button:checked {
-        background-color: #1d4ed8;
-        border: 1px solid #3b82f6;
-        color: #ffffff;
-    }
-
-    .preview-button-active {
-        background-color: #1d4ed8;
-        border: 1px solid #3b82f6;
-        color: #ffffff;
-    }
-
-    .preview-toggle {
-        background-color: #0f172a;
-        border: 1px solid #334155;
-        border-radius: 4px;
-        color: #94a3b8;
-        font-size: 9px;
-        padding-left: 6px;
-        padding-right: 6px;
-        padding-top: 3px;
-        padding-bottom: 3px;
-    }
-
-    .preview-toggle-active {
-        background-color: #f97316;
-        border: 1px solid #fb923c;
-        color: #ffffff;
-        font-weight: bold;
-    }
-
-    .mode-toggle {
-        child-space: 1s;
-        col-between: 6px;
-    }
-
-    .mode-button {
-        background-color: #0f172a;
-        border: 1px solid #334155;
-        border-radius: 6px;
-        color: #94a3b8;
-        font-size: 11px;
-        padding-left: 10px;
-        padding-right: 10px;
-        padding-top: 6px;
-        padding-bottom: 6px;
-    }
-
-    .mode-button-active {
-        background-color: #1d4ed8;
-        border: 1px solid #3b82f6;
-        color: #ffffff;
-        font-size: 11px;
-        padding-left: 10px;
-        padding-right: 10px;
-        padding-top: 6px;
-        padding-bottom: 6px;
-    }
-
-    .column-header {
-        font-size: 11px;
-        font-weight: bold;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 15px;
-    }
-
-    .col-levels { color: #94a3b8; }
-    .col-clean { color: #60a5fa; } /* Blue 400 */
-    .col-polish { color: #60a5fa; }
-
-    .slider-label {
-        font-size: 11px;
-        color: #94a3b8;
-    }
-
-    .slider-value {
-        font-size: 11px;
-        color: #f1f5f9;
-        font-weight: bold;
-        text-align: right;
-    }
-
-    .meter-label {
-        font-size: 9px;
-        color: #64748b;
-        width: 100%;
-        text-align: center;
-        margin-bottom: 5px;
-    }
-
-    .delta-label {
-        font-size: 9px;
-        color: #64748b;
-    }
-
-    .footer {
-        height: 24px;
-        background-color: #0f172a;
-        padding-left: 8px;
-        padding-right: 8px;
-        padding-bottom: 4px;
-    }
-
-    .log-button {
-        background-color: transparent;
-        border: none;
-        color: #475569;
-        font-size: 9px;
-        padding-left: 4px;
-        padding-right: 4px;
-        padding-top: 2px;
-        padding-bottom: 2px;
-    }
-
-    .log-button:hover {
-        color: #94a3b8;
-    }
-"#;
+// ============================================================================
+// DATA MODEL
+// ============================================================================
 
 #[derive(Lens, Clone)]
 pub struct Data {
     pub params: Arc<VoiceParams>,
+    #[cfg(feature = "debug")]
+    pub css_temp_path: Arc<Mutex<std::path::PathBuf>>,
 }
 
-impl Model for Data {}
+impl Model for Data {
+    #[allow(unused_variables)]
+    fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        #[cfg(feature = "debug")]
+        event.map(|css_event, _| match css_event {
+            CssEditorEvent::OpenExternalEditor => {
+                let theme_path = resolve_theme_css_path();
+                let css_path = if let Some(path) = theme_path {
+                    if path.exists() {
+                        eprintln!("[CSS Editor] Opening existing file: {:?}", path);
+                        path
+                    } else {
+                        eprintln!("[CSS Editor] Creating new file: {:?}", path);
+                        if let Some(parent) = path.parent() {
+                            if let Err(e) = std::fs::create_dir_all(parent) {
+                                eprintln!("[CSS Editor] Failed to create directory: {}", e);
+                            }
+                        }
+                        if let Err(e) = std::fs::write(&path, STYLE) {
+                            eprintln!("[CSS Editor] Failed to write CSS file: {}", e);
+                        } else {
+                            eprintln!("[CSS Editor] CSS file written successfully");
+                        }
+                        path
+                    }
+                } else {
+                    let temp_path = std::env::temp_dir().join("voice_studio_ui.css");
+                    eprintln!("[CSS Editor] Using temp file: {:?}", temp_path);
+                    if let Err(e) = std::fs::write(&temp_path, STYLE) {
+                        eprintln!("[CSS Editor] Failed to write temp CSS file: {}", e);
+                    }
+                    temp_path
+                };
 
+                // Store the path for reload
+                if let Ok(mut path) = self.css_temp_path.lock() {
+                    *path = css_path.clone();
+                }
+
+                eprintln!("[CSS Editor] Attempting to open: {:?}", css_path);
+
+                // Open in system default editor
+                #[cfg(target_os = "macos")]
+                {
+                    match std::process::Command::new("open")
+                        .arg("-t")
+                        .arg(&css_path)
+                        .spawn()
+                    {
+                        Ok(_) => eprintln!("[CSS Editor] Editor launched successfully"),
+                        Err(e) => eprintln!("[CSS Editor] Failed to open editor: {}", e),
+                    }
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    match std::process::Command::new("xdg-open")
+                        .arg(&css_path)
+                        .spawn()
+                    {
+                        Ok(_) => eprintln!("[CSS Editor] Editor launched successfully"),
+                        Err(e) => eprintln!("[CSS Editor] Failed to open editor: {}", e),
+                    }
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    match std::process::Command::new("notepad").arg(&css_path).spawn() {
+                        Ok(_) => eprintln!("[CSS Editor] Editor launched successfully"),
+                        Err(e) => eprintln!("[CSS Editor] Failed to open editor: {}", e),
+                    }
+                }
+            }
+            CssEditorEvent::ReloadStyles => {
+                // Reload stylesheets (re-reads any file-based styles)
+                if let Err(e) = cx.reload_styles() {
+                    eprintln!("Failed to reload styles: {}", e);
+                }
+                cx.needs_relayout();
+                cx.needs_redraw();
+            }
+        });
+    }
+}
+
+#[cfg(feature = "debug")]
+#[derive(Debug, Clone, PartialEq)]
+pub enum CssEditorEvent {
+    OpenExternalEditor,
+    ReloadStyles,
+}
+
+// NOTE: kept from your file (even if unused)
+#[allow(dead_code)]
 type VoiceParamsBoolLens = Map<Wrapper<data_derived_lenses::params>, bool>;
 
-// --- COMPONENT: LEVEL METER ---
+// ============================================================================
+// METERS
+// ============================================================================
+
+#[cfg(feature = "debug")]
+fn resolve_theme_css_path() -> Option<std::path::PathBuf> {
+    // Get the path to the VST binary
+    let exe_path = std::env::current_exe().ok()?;
+    let exe_dir = exe_path.parent()?;
+
+    // Create themes/default/ui.css in the same directory as the VST
+    Some(exe_dir.join("themes").join("default").join("ui.css"))
+}
 
 pub struct LevelMeter {
     meters: Arc<Meters>,
@@ -204,7 +151,7 @@ pub enum MeterType {
     InputR,
     OutputL,
     OutputR,
-    GainReduction, // Simplified for visual grouping
+    GainReduction,
 }
 
 impl LevelMeter {
@@ -219,162 +166,164 @@ impl View for LevelMeter {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
-        let bounds = cx.bounds();
+        let b = cx.bounds();
         let is_gr = matches!(self.meter_type, MeterType::GainReduction);
 
-        // 1. Get Value
-        let level_db = match self.meter_type {
+        let level = match self.meter_type {
             MeterType::InputL => self.meters.get_input_peak_l(),
             MeterType::InputR => self.meters.get_input_peak_r(),
             MeterType::OutputL => self.meters.get_output_peak_l(),
             MeterType::OutputR => self.meters.get_output_peak_r(),
             MeterType::GainReduction => {
-                let gr_l = self.meters.get_gain_reduction_l();
-                let gr_r = self.meters.get_gain_reduction_r();
-                0.5 * (gr_l + gr_r)
+                0.5 * (self.meters.get_gain_reduction_l() + self.meters.get_gain_reduction_r())
             }
         };
 
-        // 2. Normalize
-        let normalized = if is_gr {
-            (level_db / 20.0).clamp(0.0, 1.0)
+        let norm = if is_gr {
+            (level / 20.0).clamp(0.0, 1.0)
         } else {
-            ((level_db + 60.0) / 60.0).clamp(0.0, 1.0)
+            ((level + 60.0) / 60.0).clamp(0.0, 1.0)
         };
 
-        // 3. Draw Background (Dark Track)
-        let mut bg_path = vg::Path::new();
-        bg_path.rect(bounds.x, bounds.y, bounds.w, bounds.h);
-        canvas.fill_path(&bg_path, &vg::Paint::color(vg::Color::rgb(15, 23, 42))); // Very dark slate
-
-        // Border
+        // background
+        let mut bg = vg::Path::new();
+        bg.rect(b.x, b.y, b.w, b.h);
+        canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(15, 23, 42)));
         canvas.stroke_path(
-            &bg_path,
+            &bg,
             &vg::Paint::color(vg::Color::rgb(51, 65, 85)).with_line_width(1.0),
         );
 
-        // 4. Draw Active Meter Fill
-        if normalized > 0.001 {
-            let fill_h = bounds.h * normalized;
-            let fill_y = bounds.y + (bounds.h - fill_h);
+        // fill
+        if norm > 0.001 {
+            let fh = b.h * norm;
+            let fy = b.y + (b.h - fh);
 
-            let mut fill_path = vg::Path::new();
-            fill_path.rect(bounds.x + 1.0, fill_y, bounds.w - 2.0, fill_h);
+            let mut f = vg::Path::new();
+            f.rect(b.x + 1.0, fy, b.w - 2.0, fh);
 
-            // Gradient Paint
             let paint = if is_gr {
-                // Orange/Red for reduction
                 vg::Paint::linear_gradient(
-                    bounds.x,
-                    bounds.y,
-                    bounds.x,
-                    bounds.y + bounds.h,
-                    vg::Color::rgb(239, 68, 68),  // Red
-                    vg::Color::rgb(249, 115, 22), // Orange
+                    b.x,
+                    b.y,
+                    b.x,
+                    b.y + b.h,
+                    vg::Color::rgb(239, 68, 68),
+                    vg::Color::rgb(249, 115, 22),
                 )
             } else {
-                // Green -> Yellow -> Red
                 vg::Paint::linear_gradient(
-                    bounds.x,
-                    bounds.y + bounds.h,
-                    bounds.x,
-                    bounds.y,
-                    vg::Color::rgb(34, 197, 94), // Green (Bottom)
-                    vg::Color::rgb(239, 68, 68), // Red (Top)
+                    b.x,
+                    b.y + b.h,
+                    b.x,
+                    b.y,
+                    vg::Color::rgb(34, 197, 94),
+                    vg::Color::rgb(239, 68, 68),
                 )
             };
 
-            canvas.fill_path(&fill_path, &paint);
+            canvas.fill_path(&f, &paint);
         }
 
-        // 5. Draw "LED" segments (Grid lines)
-        let mut line_path = vg::Path::new();
-        let step = bounds.h / 20.0; // 20 segments
+        // ticks
+        let mut l = vg::Path::new();
+        let step = b.h / 20.0;
         for i in 1..20 {
-            let y_pos = bounds.y + (i as f32 * step);
-            line_path.move_to(bounds.x, y_pos);
-            line_path.line_to(cx.bounds().x + bounds.w, y_pos);
+            let y = b.y + i as f32 * step;
+            l.move_to(b.x, y);
+            l.line_to(b.x + b.w, y);
         }
+
         canvas.stroke_path(
-            &line_path,
+            &l,
             &vg::Paint::color(vg::Color::rgba(0, 0, 0, 100)).with_line_width(1.0),
         );
     }
 }
 
-// --- COMPONENT: DELTA ACTIVITY ---
+// ============================================================================
+// EFFECT ACTIVITY LEDS (shows how much processing is happening)
+// ============================================================================
 
-pub struct DeltaActivityLight {
+pub struct NoiseFloorLeds {
     meters: Arc<Meters>,
-    level: DeltaLevel,
 }
 
-#[derive(Clone, Copy)]
-pub enum DeltaLevel {
-    Idle,
-    Light,
-    Heavy,
-}
-
-impl DeltaActivityLight {
-    pub fn new(cx: &mut Context, meters: Arc<Meters>, level: DeltaLevel) -> Handle<'_, Self> {
-        Self { meters, level }.build(cx, |_| {})
+impl NoiseFloorLeds {
+    pub fn new(cx: &mut Context, meters: Arc<Meters>) -> Handle<'_, Self> {
+        Self { meters }.build(cx, |_| {})
     }
 }
 
-impl View for DeltaActivityLight {
+impl View for NoiseFloorLeds {
     fn element(&self) -> Option<&'static str> {
-        Some("delta-activity-light")
+        Some("nf-leds")
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
-        let bounds = cx.bounds();
-        let activity = self.meters.get_delta_activity();
-        let active_level = if activity < 0.5 {
-            DeltaLevel::Idle
-        } else if activity < 1.5 {
-            DeltaLevel::Light
+        let b = cx.bounds();
+
+        // Read gain reduction from compressor/leveler (in dB, positive values)
+        // Shows how much the plugin is actively processing/reducing the signal
+        let gr_l = self.meters.get_gain_reduction_l();
+        let gr_r = self.meters.get_gain_reduction_r();
+        let gr_db = gr_l.max(gr_r); // Use max for linked stereo
+
+        let radius = b.h / 2.0 - 1.0;
+        let spacing = 6.0;
+        let start_x = b.x + (b.w - (radius * 2.0 * 3.0 + spacing * 2.0)) / 2.0 + radius;
+        let cy = b.y + b.h / 2.0;
+
+        let dark_green = vg::Color::rgb(20, 83, 45);
+        let bright_green = vg::Color::rgb(34, 225, 94);
+        let dark_yellow = vg::Color::rgb(113, 63, 18);
+        let bright_yellow = vg::Color::rgb(250, 204, 21);
+        let dark_red = vg::Color::rgb(127, 29, 29);
+        let bright_red = vg::Color::rgb(239, 68, 68);
+
+        // Green = idle/minimal processing (0-2dB GR)
+        // Yellow = moderate processing (2-6dB GR)
+        // Red = heavy processing (>6dB GR)
+        let c1 = if gr_db > 0.5 {
+            bright_green
         } else {
-            DeltaLevel::Heavy
+            dark_green
         };
-        let is_active = matches!(
-            (self.level, active_level),
-            (DeltaLevel::Idle, DeltaLevel::Idle)
-                | (DeltaLevel::Light, DeltaLevel::Light)
-                | (DeltaLevel::Heavy, DeltaLevel::Heavy)
-        );
-
-        let mut path = vg::Path::new();
-        path.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 2.0);
-
-        let inactive = vg::Color::rgb(30, 41, 59);
-        let active = match self.level {
-            DeltaLevel::Idle => vg::Color::rgb(148, 163, 184),
-            DeltaLevel::Light => vg::Color::rgb(250, 204, 21),
-            DeltaLevel::Heavy => vg::Color::rgb(239, 68, 68),
+        let c2 = if gr_db > 2.0 {
+            bright_yellow
+        } else {
+            dark_yellow
         };
+        let c3 = if gr_db > 6.0 { bright_red } else { dark_red };
 
-        canvas.fill_path(
-            &path,
-            &vg::Paint::color(if is_active { active } else { inactive }),
-        );
-        canvas.stroke_path(
-            &path,
-            &vg::Paint::color(vg::Color::rgb(51, 65, 85)).with_line_width(1.0),
-        );
+        let colors = [c1, c2, c3];
+
+        for (i, col) in colors.iter().enumerate() {
+            let cx0 = start_x + (i as f32 * (radius * 2.0 + spacing));
+            let mut path = vg::Path::new();
+            path.circle(cx0, cy, radius);
+            canvas.fill_path(&path, &vg::Paint::color(*col));
+
+            if col.g > 0.5 || col.r > 0.5 {
+                canvas.global_composite_operation(vg::CompositeOperation::Lighter);
+                let mut glow = vg::Path::new();
+                glow.circle(cx0, cy, radius * 1.5);
+                canvas.fill_path(
+                    &glow,
+                    &vg::Paint::color(vg::Color::rgba(col.r as u8, col.g as u8, col.b as u8, 100)),
+                );
+                canvas.global_composite_operation(vg::CompositeOperation::SourceOver);
+            }
+        }
     }
 }
 
-// --- COMPONENT: MODERN SLIDER ---
-
-/// Draws the visual representation (Fill bar)
-pub struct SliderVisuals {
-    params: Arc<VoiceParams>,
-    param_id: ParamId,
-}
+// ============================================================================
+// SLIDER VISUALS + DIAL VISUALS
+// ============================================================================
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum ParamId {
+pub(crate) enum ParamId {
     NoiseReduction,
     NoiseTone,
     ReverbReduction,
@@ -383,18 +332,15 @@ pub enum ParamId {
     DeEsser,
     Leveler,
     OutputGain,
-    UseMl,
+    BreathControl,
     MacroDistance,
     MacroClarity,
     MacroConsistency,
 }
 
-/// Preview parameters - only subtractive effects have preview
-#[derive(Clone, Copy)]
-pub enum PreviewParamId {
-    Denoise,
-    Deverb,
-    DeEsser,
+pub struct SliderVisuals {
+    params: Arc<VoiceParams>,
+    param_id: ParamId,
 }
 
 impl SliderVisuals {
@@ -409,10 +355,8 @@ impl View for SliderVisuals {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
-        let bounds = cx.bounds();
-
-        // Get Normalized Value
-        let normalized = match self.param_id {
+        let b = cx.bounds();
+        let val = match self.param_id {
             ParamId::NoiseReduction => self.params.noise_reduction.modulated_normalized_value(),
             ParamId::NoiseTone => self.params.noise_tone.modulated_normalized_value(),
             ParamId::ReverbReduction => self.params.reverb_reduction.modulated_normalized_value(),
@@ -421,304 +365,420 @@ impl View for SliderVisuals {
             ParamId::DeEsser => self.params.de_esser.modulated_normalized_value(),
             ParamId::Leveler => self.params.leveler.modulated_normalized_value(),
             ParamId::OutputGain => self.params.output_gain.modulated_normalized_value(),
-            ParamId::UseMl => self.params.use_ml.modulated_normalized_value(),
+            ParamId::BreathControl => self.params.breath_control.modulated_normalized_value(),
             ParamId::MacroDistance => self.params.macro_distance.modulated_normalized_value(),
             ParamId::MacroClarity => self.params.macro_clarity.modulated_normalized_value(),
             ParamId::MacroConsistency => self.params.macro_consistency.modulated_normalized_value(),
         };
 
-        // 1. Draw Background Track
         let mut bg = vg::Path::new();
-        bg.rounded_rect(bounds.x, bounds.y, bounds.w, bounds.h, 2.0);
-        canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(30, 41, 59))); // Slate 800
+        bg.rounded_rect(b.x, b.y, b.w, b.h, 3.0);
+        canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(30, 41, 59)));
         canvas.stroke_path(
             &bg,
             &vg::Paint::color(vg::Color::rgb(51, 65, 85)).with_line_width(1.0),
-        ); // Border
+        );
 
-        // 2. Draw Fill Bar
         if self.param_id == ParamId::NoiseTone {
-            // Bipolar drawing for Tone
-            let center_x = bounds.x + bounds.w / 2.0;
-            let val_x = bounds.x + bounds.w * normalized;
-
-            let (start_x, w) = if normalized >= 0.5 {
-                (center_x, val_x - center_x)
+            let cx0 = b.x + b.w / 2.0;
+            let vx = b.x + b.w * val;
+            let (sx, w) = if val >= 0.5 {
+                (cx0, vx - cx0)
             } else {
-                (val_x, center_x - val_x)
+                (vx, cx0 - vx)
             };
 
             if w > 0.5 {
-                let mut fill = vg::Path::new();
-                fill.rounded_rect(start_x, bounds.y, w, bounds.h, 2.0);
-
-                // Use a slightly different color or same blue
-                let fill_color = vg::Color::rgba(59, 130, 246, 180);
-                canvas.fill_path(&fill, &vg::Paint::color(fill_color));
-
-                // Cap line at value end
-                let mut cap = vg::Path::new();
-                cap.move_to(val_x, bounds.y);
-                cap.line_to(val_x, bounds.y + bounds.h);
-                canvas.stroke_path(
-                    &cap,
-                    &vg::Paint::color(vg::Color::rgb(96, 165, 250)).with_line_width(1.0),
-                );
+                let mut f = vg::Path::new();
+                f.rounded_rect(sx, b.y, w, b.h, 3.0);
+                canvas.fill_path(&f, &vg::Paint::color(vg::Color::rgba(59, 130, 246, 180)));
             }
-        } else if normalized > 0.0 {
-            // Standard Unipolar drawing
-            let mut fill = vg::Path::new();
-            fill.rounded_rect(bounds.x, bounds.y, bounds.w * normalized, bounds.h, 2.0);
 
-            // Blue fill with slight transparency
-            let fill_color = vg::Color::rgba(59, 130, 246, 180); // Blue 500
-            canvas.fill_path(&fill, &vg::Paint::color(fill_color));
-
-            // Bright end cap line
-            let mut cap = vg::Path::new();
-            cap.move_to(bounds.x + (bounds.w * normalized), bounds.y);
-            cap.line_to(bounds.x + (bounds.w * normalized), bounds.y + bounds.h);
+            let mut c = vg::Path::new();
+            c.move_to(cx0, b.y);
+            c.line_to(cx0, b.y + b.h);
             canvas.stroke_path(
-                &cap,
-                &vg::Paint::color(vg::Color::rgb(96, 165, 250)).with_line_width(1.0),
+                &c,
+                &vg::Paint::color(vg::Color::rgba(255, 255, 255, 40)).with_line_width(1.0),
             );
-        }
-
-        // 3. Center line for Tone (if needed, optional logic here)
-        if self.param_id == ParamId::NoiseTone {
-            let mut center = vg::Path::new();
-            center.move_to(bounds.x + bounds.w / 2.0, bounds.y);
-            center.line_to(bounds.x + bounds.w / 2.0, bounds.y + bounds.h);
-            canvas.stroke_path(
-                &center,
-                &vg::Paint::color(vg::Color::rgba(255, 255, 255, 30)).with_line_width(1.0),
-            );
+        } else if val > 0.0 {
+            let mut f = vg::Path::new();
+            f.rounded_rect(b.x, b.y, b.w * val, b.h, 3.0);
+            canvas.fill_path(&f, &vg::Paint::color(vg::Color::rgba(59, 130, 246, 180)));
         }
     }
 }
 
-/// Helper: Creates Label, Value, Visual Bar, and Invisible Interaction Slider
-pub fn create_modern_slider<'a, P>(
-    cx: &'a mut Context,
-    label_text: &'static str,
-    params_arc: Arc<VoiceParams>,
-    gui_context: Arc<dyn GuiContext>,
+pub struct DialVisuals {
+    params: Arc<VoiceParams>,
     param_id: ParamId,
-    params_to_param: impl Fn(&Arc<VoiceParams>) -> &P + Copy + 'static,
+}
+
+impl DialVisuals {
+    pub fn new(cx: &mut Context, params: Arc<VoiceParams>, param_id: ParamId) -> Handle<'_, Self> {
+        Self { params, param_id }.build(cx, |_| {})
+    }
+}
+
+impl View for DialVisuals {
+    fn element(&self) -> Option<&'static str> {
+        Some("dial-visuals")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let b = cx.bounds();
+
+        let val = match self.param_id {
+            ParamId::MacroDistance => self.params.macro_distance.modulated_normalized_value(),
+            ParamId::MacroClarity => self.params.macro_clarity.modulated_normalized_value(),
+            ParamId::MacroConsistency => self.params.macro_consistency.modulated_normalized_value(),
+            _ => 0.0,
+        }
+        .clamp(0.0, 1.0);
+
+        let size = b.w.min(b.h);
+        let radius = size * 0.35;
+        let cx0 = b.x + b.w * 0.5;
+        let cy0 = b.y + b.h * 0.5;
+
+        let start_angle = -225.0_f32.to_radians();
+        let end_angle = 45.0_f32.to_radians();
+        let current_angle = start_angle + (end_angle - start_angle) * val;
+
+        let mut track = vg::Path::new();
+        track.arc(cx0, cy0, radius, start_angle, end_angle, vg::Solidity::Hole);
+        canvas.stroke_path(
+            &track,
+            &vg::Paint::color(vg::Color::rgb(30, 41, 59))
+                .with_line_width(8.0)
+                .with_line_cap(vg::LineCap::Round),
+        );
+
+        let mut active = vg::Path::new();
+        active.arc(
+            cx0,
+            cy0,
+            radius,
+            start_angle,
+            current_angle,
+            vg::Solidity::Hole,
+        );
+        canvas.stroke_path(
+            &active,
+            &vg::Paint::color(vg::Color::rgb(59, 130, 246))
+                .with_line_width(8.0)
+                .with_line_cap(vg::LineCap::Round),
+        );
+
+        let knob_radius = size * 0.32;
+        let mut knob = vg::Path::new();
+        knob.circle(cx0, cy0, knob_radius);
+        canvas.fill_path(&knob, &vg::Paint::color(vg::Color::rgb(15, 23, 42)));
+        canvas.stroke_path(
+            &knob,
+            &vg::Paint::color(vg::Color::rgb(51, 65, 85)).with_line_width(2.0),
+        );
+
+        let marker_radius = 3.0;
+        let marker_r = knob_radius - 6.0;
+        let mx = cx0 + current_angle.cos() * marker_r;
+        let my = cy0 + current_angle.sin() * marker_r;
+
+        let mut marker = vg::Path::new();
+        marker.circle(mx, my, marker_radius);
+        canvas.fill_path(&marker, &vg::Paint::color(vg::Color::white()));
+    }
+}
+
+// ============================================================================
+// WIDGET HELPERS
+// ============================================================================
+
+fn create_slider<'a, P>(
+    cx: &'a mut Context,
+    label: &'static str,
+    params: Arc<VoiceParams>,
+    gui: Arc<dyn GuiContext>,
+    id: ParamId,
+    map: impl Fn(&Arc<VoiceParams>) -> &P + Copy + 'static,
 ) -> Handle<'a, VStack>
 where
     P: Param + 'static,
 {
-    // Setup for mouse down handler (macro write lock)
-    let params_for_mouse = params_arc.clone();
-    let gui_context_for_mouse = gui_context.clone();
-
-    let should_disable_macro = match param_id {
-        ParamId::MacroDistance | ParamId::MacroClarity | ParamId::MacroConsistency => false,
-        _ => true,
-    };
+    let p_m = params.clone();
+    let g_m = gui.clone();
+    let disable_macros = !matches!(
+        id,
+        ParamId::MacroDistance | ParamId::MacroClarity | ParamId::MacroConsistency
+    );
 
     VStack::new(cx, move |cx| {
-        // 1. Text Row (Label ----- Value)
         HStack::new(cx, move |cx| {
-            Label::new(cx, label_text)
-                .class("slider-label")
-                .text_wrap(false);
-            Element::new(cx).width(Stretch(1.0));
-            let value_lens =
-                ParamWidgetBase::make_lens(Data::params, params_to_param, |param: &P| {
-                    param.normalized_value_to_string(param.unmodulated_normalized_value(), true)
-                });
-            Label::new(cx, value_lens)
-                .class("slider-value")
-                .width(Pixels(60.0));
+            Label::new(cx, label).class("slider-label").text_wrap(false);
+            Element::new(cx).class("fill-width");
+            let lens = ParamWidgetBase::make_lens(Data::params, map, |p: &P| {
+                p.normalized_value_to_string(p.unmodulated_normalized_value(), true)
+            });
+            Label::new(cx, lens).class("slider-value");
         })
-        .height(Pixels(20.0))
-        .width(Stretch(1.0))
-        .col_between(Pixels(6.0));
+        .class("slider-header");
 
-        // 2. The Slider Stack
         ZStack::new(cx, move |cx| {
-            // Layer 1: The Visuals (Custom Drawing)
-            SliderVisuals::new(cx, params_arc.clone(), param_id)
-                .width(Stretch(1.0))
-                .height(Stretch(1.0));
-
-            // Layer 2: The Logic (Invisible ParamSlider)
-            ParamSlider::new(cx, Data::params, move |params| params_to_param(params))
-                .width(Stretch(1.0))
-                .height(Stretch(1.0))
-                .opacity(0.0); // Invisible but captures mouse events
+            SliderVisuals::new(cx, params.clone(), id).class("fill-both");
+            ParamSlider::new(cx, Data::params, move |p| map(p))
+                .class("fill-both")
+                .class("input-hidden");
         })
-        .height(Pixels(24.0))
+        .class("slider-visual")
         .on_mouse_down(move |_, _| {
-            if should_disable_macro {
-                set_macro_mode(&params_for_mouse, &gui_context_for_mouse, false);
+            if disable_macros {
+                set_macro_mode(&p_m, &g_m, false);
             }
         });
     })
-    .height(Auto)
-    .bottom(Pixels(8.0)) // Reduced margin
+    .class("slider-container")
+}
+
+fn create_macro_dial<'a, P>(
+    cx: &'a mut Context,
+    label: &'static str,
+    params: Arc<VoiceParams>,
+    id: ParamId,
+    map: impl Fn(&Arc<VoiceParams>) -> &P + Copy + 'static,
+) -> Handle<'a, VStack>
+where
+    P: Param + 'static,
+{
+    VStack::new(cx, move |cx| {
+        Label::new(cx, label).class("dial-label");
+
+        // Use ZStack to layer visuals behind the interactive slider
+        ZStack::new(cx, move |cx| {
+            // Visual representation (behind)
+            DialVisuals::new(cx, params.clone(), id).class("fill-both");
+
+            // Interactive slider (in front, invisible)
+            ParamSlider::new(cx, Data::params, move |p| map(p))
+                .class("fill-both")
+                .class("input-hidden")
+                .z_index(1);
+        })
+        .class("dial-visual");
+
+        // Value display
+        let lens = ParamWidgetBase::make_lens(Data::params, map, |p: &P| {
+            p.normalized_value_to_string(p.unmodulated_normalized_value(), true)
+        });
+        Label::new(cx, lens).class("dial-value");
+    })
+    .class("dial-container")
+}
+
+fn create_dropdown<'a>(
+    cx: &'a mut Context,
+    label: &'static str,
+    params: Arc<VoiceParams>,
+    gui: Arc<dyn GuiContext>,
+) -> Handle<'a, HStack> {
+    HStack::new(cx, move |cx| {
+        Label::new(cx, label).class("dropdown-label");
+
+        let lens = ParamWidgetBase::make_lens(
+            Data::params,
+            |p| &p.final_output_preset,
+            |p| p.normalized_value_to_string(p.unmodulated_normalized_value(), true),
+        );
+
+        Dropdown::new(
+            cx,
+            move |cx| Label::new(cx, lens).class("dropdown-selected"),
+            move |cx| {
+                let params_list = params.clone();
+                let gui_list = gui.clone();
+
+                VStack::new(cx, move |cx| {
+                    for preset in OutputPreset::all_presets().iter() {
+                        let preset_value = *preset;
+                        let params_item = params_list.clone();
+                        let gui_item = gui_list.clone();
+
+                        Label::new(cx, preset_value.name())
+                            .class("dropdown-option")
+                            .on_press(move |cx| {
+                                let setter = ParamSetter::new(gui_item.as_ref());
+                                setter.begin_set_parameter(&params_item.final_output_preset);
+                                setter
+                                    .set_parameter(&params_item.final_output_preset, preset_value);
+                                setter.end_set_parameter(&params_item.final_output_preset);
+                                cx.emit(PopupEvent::Close);
+                            });
+                    }
+                })
+                .class("dropdown-options");
+            },
+        )
+        .class("dropdown-box");
+    })
+    .class("dropdown-row")
+}
+
+fn create_dsp_preset_dropdown<'a>(
+    cx: &'a mut Context,
+    label: &'static str,
+    params: Arc<VoiceParams>,
+    gui: Arc<dyn GuiContext>,
+) -> Handle<'a, HStack> {
+    HStack::new(cx, move |cx| {
+        Label::new(cx, label).class("dropdown-label");
+
+        let lens = ParamWidgetBase::make_lens(
+            Data::params,
+            |p| &p.dsp_preset,
+            |p| p.normalized_value_to_string(p.unmodulated_normalized_value(), true),
+        );
+
+        Dropdown::new(
+            cx,
+            move |cx| Label::new(cx, lens).class("dropdown-selected"),
+            move |cx| {
+                let params_list = params.clone();
+                let gui_list = gui.clone();
+
+                VStack::new(cx, move |cx| {
+                    for preset in [
+                        DspPreset::Manual,
+                        DspPreset::PodcastNoisy,
+                        DspPreset::VoiceoverStudio,
+                        DspPreset::InterviewOutdoor,
+                        DspPreset::BroadcastClean,
+                    ]
+                    .iter()
+                    {
+                        let preset_value = *preset;
+                        let params_item = params_list.clone();
+                        let gui_item = gui_list.clone();
+
+                        Label::new(cx, preset_value.name())
+                            .class("dropdown-option")
+                            .on_press(move |cx| {
+                                let setter = ParamSetter::new(gui_item.as_ref());
+
+                                // Set the preset parameter itself
+                                setter.begin_set_parameter(&params_item.dsp_preset);
+                                setter.set_parameter(&params_item.dsp_preset, preset_value);
+                                setter.end_set_parameter(&params_item.dsp_preset);
+
+                                // Apply preset values to DSP parameters
+                                if let Some(values) = preset_value.get_values() {
+                                    // Set advanced parameters
+                                    setter.begin_set_parameter(&params_item.noise_reduction);
+                                    setter.set_parameter(
+                                        &params_item.noise_reduction,
+                                        values.noise_reduction,
+                                    );
+                                    setter.end_set_parameter(&params_item.noise_reduction);
+
+                                    setter.begin_set_parameter(&params_item.noise_mode);
+                                    setter
+                                        .set_parameter(&params_item.noise_mode, values.noise_mode);
+                                    setter.end_set_parameter(&params_item.noise_mode);
+
+                                    let dtln_enabled =
+                                        values.noise_mode == crate::presets::NoiseMode::Aggressive;
+                                    setter.begin_set_parameter(&params_item.use_dtln);
+                                    setter.set_parameter(&params_item.use_dtln, dtln_enabled);
+                                    setter.end_set_parameter(&params_item.use_dtln);
+
+                                    setter.begin_set_parameter(&params_item.reverb_reduction);
+                                    setter.set_parameter(
+                                        &params_item.reverb_reduction,
+                                        values.reverb_reduction,
+                                    );
+                                    setter.end_set_parameter(&params_item.reverb_reduction);
+
+                                    setter.begin_set_parameter(&params_item.proximity);
+                                    setter.set_parameter(&params_item.proximity, values.proximity);
+                                    setter.end_set_parameter(&params_item.proximity);
+
+                                    setter.begin_set_parameter(&params_item.clarity);
+                                    setter.set_parameter(&params_item.clarity, values.clarity);
+                                    setter.end_set_parameter(&params_item.clarity);
+
+                                    setter.begin_set_parameter(&params_item.de_esser);
+                                    setter.set_parameter(&params_item.de_esser, values.de_esser);
+                                    setter.end_set_parameter(&params_item.de_esser);
+
+                                    setter.begin_set_parameter(&params_item.leveler);
+                                    setter.set_parameter(&params_item.leveler, values.leveler);
+                                    setter.end_set_parameter(&params_item.leveler);
+
+                                    setter.begin_set_parameter(&params_item.breath_control);
+                                    setter.set_parameter(
+                                        &params_item.breath_control,
+                                        values.breath_control,
+                                    );
+                                    setter.end_set_parameter(&params_item.breath_control);
+
+                                    // Also update macro controls to match (reverse mapping)
+                                    let (distance, clarity_macro, consistency) =
+                                        macro_controller::estimate_macros_from_advanced(
+                                            values.noise_reduction,
+                                            values.reverb_reduction,
+                                            values.proximity,
+                                            values.clarity,
+                                            values.de_esser,
+                                            values.leveler,
+                                            values.breath_control,
+                                        );
+
+                                    setter.begin_set_parameter(&params_item.macro_distance);
+                                    setter.set_parameter(&params_item.macro_distance, distance);
+                                    setter.end_set_parameter(&params_item.macro_distance);
+
+                                    setter.begin_set_parameter(&params_item.macro_clarity);
+                                    setter.set_parameter(&params_item.macro_clarity, clarity_macro);
+                                    setter.end_set_parameter(&params_item.macro_clarity);
+
+                                    setter.begin_set_parameter(&params_item.macro_consistency);
+                                    setter
+                                        .set_parameter(&params_item.macro_consistency, consistency);
+                                    setter.end_set_parameter(&params_item.macro_consistency);
+                                }
+
+                                cx.emit(PopupEvent::Close);
+                            });
+                    }
+                })
+                .class("dropdown-options");
+            },
+        )
+        .class("dropdown-box");
+    })
+    .class("dropdown-row")
 }
 
 fn set_macro_mode(params: &Arc<VoiceParams>, gui_context: &Arc<dyn GuiContext>, enabled: bool) {
     let setter = ParamSetter::new(gui_context.as_ref());
-
-    // When switching FROM Simple mode TO Advanced mode, sync the advanced params
-    // to reflect the current macro values. This ensures that the state is consistent.
-    if !enabled && params.macro_mode.value() {
-        let distance = params.macro_distance.value();
-        let clarity = params.macro_clarity.value();
-        let consistency = params.macro_consistency.value();
-
-        let targets = compute_targets_from_macros(distance, clarity, consistency);
-
-        // Set advanced params to match macro targets
-        setter.begin_set_parameter(&params.noise_reduction);
-        setter.set_parameter(&params.noise_reduction, targets.noise_reduction);
-        setter.end_set_parameter(&params.noise_reduction);
-
-        setter.begin_set_parameter(&params.noise_tone);
-        setter.set_parameter(&params.noise_tone, targets.noise_tone);
-        setter.end_set_parameter(&params.noise_tone);
-
-        setter.begin_set_parameter(&params.reverb_reduction);
-        setter.set_parameter(&params.reverb_reduction, targets.reverb_reduction);
-        setter.end_set_parameter(&params.reverb_reduction);
-
-        setter.begin_set_parameter(&params.proximity);
-        setter.set_parameter(&params.proximity, targets.proximity);
-        setter.end_set_parameter(&params.proximity);
-
-        setter.begin_set_parameter(&params.de_esser);
-        setter.set_parameter(&params.de_esser, targets.de_esser);
-        setter.end_set_parameter(&params.de_esser);
-
-        setter.begin_set_parameter(&params.leveler);
-        setter.set_parameter(&params.leveler, targets.leveler);
-        setter.end_set_parameter(&params.leveler);
-
-        // ML Advisor state is preserved (it's a user preference)
-        setter.begin_set_parameter(&params.use_ml);
-        setter.set_parameter(&params.use_ml, params.use_ml.value());
-        setter.end_set_parameter(&params.use_ml);
-    }
-
     setter.begin_set_parameter(&params.macro_mode);
     setter.set_parameter(&params.macro_mode, enabled);
     setter.end_set_parameter(&params.macro_mode);
-
-    if enabled {
-        set_preview_mode(params, gui_context, None);
-    }
 }
 
-fn set_preview_mode(
-    params: &Arc<VoiceParams>,
-    gui_context: &Arc<dyn GuiContext>,
-    active: Option<PreviewParamId>,
-) {
+fn sync_advanced_from_macros(params: &Arc<VoiceParams>, gui_context: &Arc<dyn GuiContext>) {
     let setter = ParamSetter::new(gui_context.as_ref());
-    let (denoise, deverb, deesser) = match active {
-        Some(PreviewParamId::Denoise) => (true, false, false),
-        Some(PreviewParamId::Deverb) => (false, true, false),
-        Some(PreviewParamId::DeEsser) => (false, false, true),
-        None => (false, false, false),
-    };
-
-    setter.begin_set_parameter(&params.preview_denoise);
-    setter.set_parameter(&params.preview_denoise, denoise);
-    setter.end_set_parameter(&params.preview_denoise);
-
-    setter.begin_set_parameter(&params.preview_deverb);
-    setter.set_parameter(&params.preview_deverb, deverb);
-    setter.end_set_parameter(&params.preview_deverb);
-
-    setter.begin_set_parameter(&params.preview_deesser);
-    setter.set_parameter(&params.preview_deesser, deesser);
-    setter.end_set_parameter(&params.preview_deesser);
+    macro_controller::apply_simple_macros(params.as_ref(), &setter);
 }
 
-fn build_header_previews(
-    cx: &mut Context,
-    params: Arc<VoiceParams>,
-    gui_context: Arc<dyn GuiContext>,
-) {
-    HStack::new(cx, move |cx| {
-        Label::new(cx, "PREVIEW CUTS:")
-            .class("header-sub")
-            .top(Pixels(2.0));
+// ============================================================================
+// BUILDERS
+// ============================================================================
 
-        create_header_preview_button(
-            cx,
-            "Noise",
-            params.clone(),
-            gui_context.clone(),
-            PreviewParamId::Denoise,
-        );
-        create_header_preview_button(
-            cx,
-            "Reverb",
-            params.clone(),
-            gui_context.clone(),
-            PreviewParamId::Deverb,
-        );
-        create_header_preview_button(
-            cx,
-            "Sibilance",
-            params.clone(),
-            gui_context.clone(),
-            PreviewParamId::DeEsser,
-        );
-    })
-    .col_between(Pixels(8.0))
-    .child_top(Stretch(1.0))
-    .child_bottom(Stretch(1.0));
-}
-
-fn create_header_preview_button(
-    cx: &mut Context,
-    text: &'static str,
-    params: Arc<VoiceParams>,
-    gui_context: Arc<dyn GuiContext>,
-    id: PreviewParamId,
-) {
-    let params_for_binding = params.clone();
-    let gui_context_for_binding = gui_context.clone();
-
-    Binding::new(
-        cx,
-        Data::params.map(move |p| match id {
-            PreviewParamId::Denoise => p.preview_denoise.value(),
-            PreviewParamId::Deverb => p.preview_deverb.value(),
-            PreviewParamId::DeEsser => p.preview_deesser.value(),
-        }),
-        move |cx, is_active_lens: VoiceParamsBoolLens| {
-            let is_active = is_active_lens.get(cx);
-            let params_btn = params_for_binding.clone();
-            let gui_ctx = gui_context_for_binding.clone();
-
-            Button::new(
-                cx,
-                move |_| {
-                    let next = if is_active { None } else { Some(id) };
-                    set_preview_mode(&params_btn, &gui_ctx, next);
-                },
-                |cx| Label::new(cx, text),
-            )
-            .class(if is_active {
-                "preview-button-active"
-            } else {
-                "preview-button"
-            });
-        },
-    );
-}
-
-fn build_levels_column(cx: &mut Context, meters: Arc<Meters>) {
+fn build_levels(cx: &mut Context, meters: Arc<Meters>) {
+    // IMPORTANT: break Arc<Meters> into independent clones so nested move closures don't "consume" it
     let meters_in = meters.clone();
     let meters_gr = meters.clone();
     let meters_out = meters.clone();
+    let meters_floor = meters.clone();
 
     VStack::new(cx, move |cx| {
         Label::new(cx, "LEVELS")
@@ -726,380 +786,464 @@ fn build_levels_column(cx: &mut Context, meters: Arc<Meters>) {
             .class("col-levels");
 
         HStack::new(cx, move |cx| {
-            // IN
+            let mi = meters_in.clone();
             VStack::new(cx, move |cx| {
                 Label::new(cx, "IN").class("meter-label");
+                let mi2 = mi.clone();
                 HStack::new(cx, move |cx| {
-                    LevelMeter::new(cx, meters_in.clone(), MeterType::InputL).width(Pixels(10.0));
-                    LevelMeter::new(cx, meters_in.clone(), MeterType::InputR).width(Pixels(10.0));
+                    LevelMeter::new(cx, mi2.clone(), MeterType::InputL).class("meter-track");
+                    LevelMeter::new(cx, mi2.clone(), MeterType::InputR).class("meter-track");
                 })
-                .col_between(Pixels(2.0))
-                .height(Stretch(1.0));
+                .class("meter-pair");
             })
-            .width(Pixels(30.0))
-            .height(Stretch(1.0));
+            .class("meter-col");
 
-            // GR
+            let mg = meters_gr.clone();
             VStack::new(cx, move |cx| {
                 Label::new(cx, "GR").class("meter-label");
-                LevelMeter::new(cx, meters_gr.clone(), MeterType::GainReduction)
-                    .width(Pixels(14.0))
-                    .height(Stretch(1.0));
+                LevelMeter::new(cx, mg.clone(), MeterType::GainReduction)
+                    .class("meter-track")
+                    .class("fill-height");
             })
-            .width(Pixels(30.0))
-            .height(Stretch(1.0));
+            .class("meter-col");
 
-            // OUT
+            let mo = meters_out.clone();
             VStack::new(cx, move |cx| {
                 Label::new(cx, "OUT").class("meter-label");
+                let mo2 = mo.clone();
                 HStack::new(cx, move |cx| {
-                    LevelMeter::new(cx, meters_out.clone(), MeterType::OutputL).width(Pixels(10.0));
-                    LevelMeter::new(cx, meters_out.clone(), MeterType::OutputR).width(Pixels(10.0));
+                    LevelMeter::new(cx, mo2.clone(), MeterType::OutputL).class("meter-track");
+                    LevelMeter::new(cx, mo2.clone(), MeterType::OutputR).class("meter-track");
                 })
-                .col_between(Pixels(2.0))
-                .height(Stretch(1.0));
+                .class("meter-pair");
             })
-            .width(Pixels(30.0))
-            .height(Stretch(1.0));
+            .class("meter-col");
         })
-        .col_between(Pixels(10.0))
-        .height(Pixels(180.0)); // Fixed height for meters
+        .class("meter-grid");
 
-        // Spacing between meters and delta activity
-        Element::new(cx).height(Pixels(10.0));
+        Element::new(cx).class("spacer");
 
-        Label::new(cx, "DELTA ACTIVITY").class("meter-label");
+        let mf = meters_floor.clone();
         HStack::new(cx, move |cx| {
-            let meters_delta = meters.clone();
-            VStack::new(cx, move |cx| {
-                DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Idle)
-                    .width(Pixels(12.0))
-                    .height(Pixels(8.0));
-                Label::new(cx, "Idle").class("delta-label");
-            });
-            let meters_delta = meters.clone();
-            VStack::new(cx, move |cx| {
-                DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Light)
-                    .width(Pixels(12.0))
-                    .height(Pixels(8.0));
-                Label::new(cx, "Light").class("delta-label");
-            });
-            let meters_delta = meters.clone();
-            VStack::new(cx, move |cx| {
-                DeltaActivityLight::new(cx, meters_delta.clone(), DeltaLevel::Heavy)
-                    .width(Pixels(12.0))
-                    .height(Pixels(8.0));
-                Label::new(cx, "Heavy").class("delta-label");
-            });
+            Label::new(cx, "ACTIVITY").class("meter-label");
+            NoiseFloorLeds::new(cx, mf.clone()).class("noise-floor-leds");
         })
-        .col_between(Pixels(10.0));
+        .class("noise-floor-row");
     })
-    .width(Pixels(130.0)); // Fixed width for levels column
+    .class("levels-column");
 }
 
-fn build_clean_column(
-    cx: &mut Context,
-    params: Arc<VoiceParams>,
-    gui_context: Arc<dyn GuiContext>,
-) {
+fn build_macro(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
+    // Split clones to avoid "use after move" across multiple nested closures
+    let params_dials = params.clone();
+    let params_dropdown = params.clone();
+    let gui_dropdown = gui.clone();
+    let params_sync = params.clone();
+    let gui_sync = gui.clone();
+
+    VStack::new(cx, move |cx| {
+        Binding::new(
+            cx,
+            Data::params.map(|p| {
+                (
+                    p.macro_mode.value(),
+                    p.macro_distance.value(),
+                    p.macro_clarity.value(),
+                    p.macro_consistency.value(),
+                )
+            }),
+            move |cx, lens| {
+                let (macro_mode, _, _, _) = lens.get(cx);
+                if macro_mode {
+                    sync_advanced_from_macros(&params_sync, &gui_sync);
+                }
+                Element::new(cx).height(Pixels(0.0)).width(Pixels(0.0));
+            },
+        );
+
+        Label::new(cx, "EASY CONTROLS")
+            .class("column-header")
+            .class("col-clean");
+
+        create_dsp_preset_dropdown(
+            cx,
+            "DSP PRESET",
+            params_dropdown.clone(),
+            gui_dropdown.clone(),
+        );
+
+        Element::new(cx).class("fill-height");
+
+        HStack::new(cx, move |cx| {
+            let p = params_dials.clone();
+            create_macro_dial(cx, "DISTANCE", p.clone(), ParamId::MacroDistance, |pp| {
+                &pp.macro_distance
+            });
+            create_macro_dial(cx, "CLARITY", p.clone(), ParamId::MacroClarity, |pp| {
+                &pp.macro_clarity
+            });
+            create_macro_dial(
+                cx,
+                "CONSISTENCY",
+                p.clone(),
+                ParamId::MacroConsistency,
+                |pp| &pp.macro_consistency,
+            );
+        })
+        .class("dials-container");
+
+        Element::new(cx).class("fill-height");
+
+        create_dropdown(
+            cx,
+            "FINAL OUTPUT",
+            params_dropdown.clone(),
+            gui_dropdown.clone(),
+        );
+    })
+    .class("macro-column");
+}
+
+fn build_clean(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
     VStack::new(cx, move |cx| {
         Label::new(cx, "CLEAN & REPAIR")
             .class("column-header")
             .class("col-clean");
 
-        create_modern_slider(
+        create_slider(
             cx,
             "Noise Reduction",
             params.clone(),
-            gui_context.clone(),
+            gui.clone(),
             ParamId::NoiseReduction,
             |p| &p.noise_reduction,
         );
-        create_modern_slider(
-            cx,
-            "Tone",
-            params.clone(),
-            gui_context.clone(),
-            ParamId::NoiseTone,
-            |p| &p.noise_tone,
-        );
-        create_modern_slider(
-            cx,
-            "De-Verb",
-            params.clone(),
-            gui_context.clone(),
-            ParamId::ReverbReduction,
-            |p| &p.reverb_reduction,
-        );
-        create_modern_slider(
-            cx,
-            "Clarity",
-            params.clone(),
-            gui_context.clone(),
-            ParamId::Clarity,
-            |p| &p.clarity,
-        );
 
-        // ML Toggle
-        let params_for_ml = params.clone();
-        let gui_ctx_for_ml = gui_context.clone();
-        Binding::new(
-            cx,
-            Data::params.map(|p| p.use_ml.value()),
-            move |cx, use_ml_lens: VoiceParamsBoolLens| {
-                let use_ml = use_ml_lens.get(cx);
-                let params_btn = params_for_ml.clone();
-                let gui_ctx_btn = gui_ctx_for_ml.clone();
-                HStack::new(cx, move |cx| {
-                    Label::new(cx, "ML Advisor")
-                        .class("slider-label")
-                        .text_wrap(false);
-                    Element::new(cx).width(Stretch(1.0));
+        // Noise Mode Toggle (Normal/Aggressive)
+        let params_toggle = params.clone();
+        let gui_toggle = gui.clone();
+        HStack::new(cx, move |cx| {
+            Label::new(cx, "Mode").class("toggle-label");
+
+            Binding::new(
+                cx,
+                Data::params.map(|p| p.use_dtln.value()),
+                move |cx, is_dtln| {
+                    let aggressive = is_dtln.get(cx);
+                    let p1 = params_toggle.clone();
+                    let g1 = gui_toggle.clone();
+
                     Button::new(
                         cx,
                         move |_| {
-                            let setter = ParamSetter::new(gui_ctx_btn.as_ref());
-                            setter.begin_set_parameter(&params_btn.use_ml);
-                            setter.set_parameter(&params_btn.use_ml, !use_ml);
-                            setter.end_set_parameter(&params_btn.use_ml);
+                            let setter = ParamSetter::new(g1.as_ref());
+                            let new_dtln = !aggressive;
+                            let new_mode = if new_dtln {
+                                crate::presets::NoiseMode::Aggressive
+                            } else {
+                                crate::presets::NoiseMode::Normal
+                            };
+                            setter.begin_set_parameter(&p1.noise_mode);
+                            setter.set_parameter(&p1.noise_mode, new_mode);
+                            setter.end_set_parameter(&p1.noise_mode);
+
+                            setter.begin_set_parameter(&p1.use_dtln);
+                            setter.set_parameter(&p1.use_dtln, new_dtln);
+                            setter.end_set_parameter(&p1.use_dtln);
                         },
-                        |cx| Label::new(cx, if use_ml { "ON" } else { "OFF" }),
+                        move |cx| Label::new(cx, if aggressive { "Aggressive" } else { "Normal" }),
                     )
-                    .class(if use_ml {
-                        "preview-toggle-active"
+                    .class(if aggressive {
+                        "mode-toggle-active"
                     } else {
-                        "preview-toggle"
-                    })
-                    .width(Pixels(40.0));
-                })
-                .height(Pixels(20.0))
-                .width(Stretch(1.0))
-                .top(Pixels(4.0));
-            },
+                        "mode-toggle"
+                    });
+                },
+            );
+        })
+        .class("toggle-row");
+
+        create_slider(
+            cx,
+            "Tone",
+            params.clone(),
+            gui.clone(),
+            ParamId::NoiseTone,
+            |p| &p.noise_tone,
+        );
+        create_slider(
+            cx,
+            "De-Verb",
+            params.clone(),
+            gui.clone(),
+            ParamId::ReverbReduction,
+            |p| &p.reverb_reduction,
+        );
+        create_slider(
+            cx,
+            "Clarity",
+            params.clone(),
+            gui.clone(),
+            ParamId::Clarity,
+            |p| &p.clarity,
+        );
+        create_slider(
+            cx,
+            "Breath Control",
+            params.clone(),
+            gui.clone(),
+            ParamId::BreathControl,
+            |p| &p.breath_control,
         );
     })
-    .width(Stretch(1.0));
+    .class("clean-column");
 }
 
-fn build_polish_column(
-    cx: &mut Context,
-    params: Arc<VoiceParams>,
-    gui_context: Arc<dyn GuiContext>,
-) {
+fn build_polish(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
     VStack::new(cx, move |cx| {
         Label::new(cx, "POLISH & ENHANCE")
             .class("column-header")
             .class("col-polish");
 
-        create_modern_slider(
+        create_slider(
             cx,
             "Proximity",
             params.clone(),
-            gui_context.clone(),
+            gui.clone(),
             ParamId::Proximity,
             |p| &p.proximity,
         );
-        create_modern_slider(
+        create_slider(
             cx,
             "De-Ess",
             params.clone(),
-            gui_context.clone(),
+            gui.clone(),
             ParamId::DeEsser,
             |p| &p.de_esser,
         );
-        create_modern_slider(
+        create_slider(
             cx,
             "Leveler",
             params.clone(),
-            gui_context.clone(),
+            gui.clone(),
             ParamId::Leveler,
             |p| &p.leveler,
         );
 
-        // Spacing
-        Element::new(cx).height(Pixels(20.0));
+        Element::new(cx).class("fill-height");
 
-        // Output Gain (Highlighted)
         Label::new(cx, "OUTPUT")
             .class("column-header")
-            .color(Color::rgb(249, 115, 22));
-        create_modern_slider(cx, "Gain", params, gui_context, ParamId::OutputGain, |p| {
-            &p.output_gain
-        });
+            .class("output-accent");
+
+        create_slider(
+            cx,
+            "Gain",
+            params.clone(),
+            gui.clone(),
+            ParamId::OutputGain,
+            |p| &p.output_gain,
+        );
+        create_dropdown(cx, "FINAL OUTPUT", params.clone(), gui.clone());
     })
-    .width(Stretch(1.0));
+    .class("polish-column");
 }
 
-fn build_macro_column(
-    cx: &mut Context,
-    params: Arc<VoiceParams>,
-    gui_context: Arc<dyn GuiContext>,
-) {
-    VStack::new(cx, move |cx| {
-        Label::new(cx, "EASY CONTROLS")
-            .class("column-header")
-            .class("col-clean");
+fn build_header(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
+    // Outer clones that live for the lifetime of this header view
+    let params_for_binding = params.clone();
+    let gui_for_binding = gui.clone();
 
-        create_modern_slider(
-            cx,
-            "Distance",
-            params.clone(),
-            gui_context.clone(),
-            ParamId::MacroDistance,
-            |p| &p.macro_distance,
-        );
-        create_modern_slider(
-            cx,
-            "Clarity",
-            params.clone(),
-            gui_context.clone(),
-            ParamId::MacroClarity,
-            |p| &p.macro_clarity,
-        );
-        create_modern_slider(
-            cx,
-            "Consistency",
-            params.clone(),
-            gui_context.clone(),
-            ParamId::MacroConsistency,
-            |p| &p.macro_consistency,
-        );
-    })
-    .width(Stretch(1.0));
-}
-
-// --- MAIN VIEW BUILDER ---
-
-pub fn build_ui(
-    cx: &mut Context,
-    params: Arc<VoiceParams>,
-    meters: Arc<Meters>,
-    _ui_proxy: Arc<Mutex<Option<ContextProxy>>>,
-    gui_context: Arc<dyn GuiContext>,
-) {
-    // Inject CSS
-    let _ = cx.add_stylesheet(STYLE);
-
-    // Bind Data
-    Data {
-        params: params.clone(),
-    }
-    .build(cx);
-
-    // Main Container
-    VStack::new(cx, move |cx| {
-        // --- HEADER ---
-        HStack::new(cx, |cx| {
-            // Title on left
-            HStack::new(cx, |cx| {
-                Label::new(cx, "VOICE STUDIO").class("header-title");
-                Label::new(cx, "Vocal Restoration & Enhancement")
-                    .class("header-sub")
-                    .left(Pixels(12.0));
-            })
-            .col_between(Pixels(0.0))
-            .child_top(Stretch(1.0))
-            .child_bottom(Stretch(1.0));
-
-            // Spacer
-            Element::new(cx).width(Stretch(1.0));
-
-            // Header Preview Buttons
-            build_header_previews(cx, params.clone(), gui_context.clone());
-
-            // Mode toggle on right
-            let params_for_mode = params.clone();
-            let gui_context_for_mode = gui_context.clone();
-            Binding::new(
-                cx,
-                Data::params.map(|p| p.macro_mode.value()),
-                move |cx, macro_mode_lens: VoiceParamsBoolLens| {
-                    let params_btn = params_for_mode.clone();
-                    let gui_ctx = gui_context_for_mode.clone();
-                    let macro_mode = macro_mode_lens.get(cx);
-                    HStack::new(cx, move |cx| {
-                        Button::new(
-                            cx,
-                            {
-                                let params_btn = params_btn.clone();
-                                let gui_ctx = gui_ctx.clone();
-                                move |_| set_macro_mode(&params_btn, &gui_ctx, true)
-                            },
-                            |cx| Label::new(cx, "Simple"),
-                        )
-                        .class(if macro_mode {
-                            "mode-button-active"
-                        } else {
-                            "mode-button"
-                        });
-                        Button::new(
-                            cx,
-                            {
-                                let params_btn = params_btn.clone();
-                                let gui_ctx = gui_ctx.clone();
-                                move |_| set_macro_mode(&params_btn, &gui_ctx, false)
-                            },
-                            |cx| Label::new(cx, "Advanced"),
-                        )
-                        .class(if macro_mode {
-                            "mode-button"
-                        } else {
-                            "mode-button-active"
-                        });
-                    })
-                    .col_between(Pixels(4.0));
-                },
-            );
+    HStack::new(cx, move |cx| {
+        VStack::new(cx, move |cx| {
+            Label::new(cx, "VxCLEANER").class("header-title");
+            Label::new(cx, "Vocal Restoration").class("header-sub");
         })
-        .class("header");
+        .class("header-title-stack");
 
-        // --- MAIN CONTENT GRID ---
-        let meters_for_main = meters.clone();
-        let params_for_main = params.clone();
-        let gui_context_for_main = gui_context.clone();
+        Element::new(cx).class("fill-width");
+
         Binding::new(
             cx,
             Data::params.map(|p| p.macro_mode.value()),
-            move |cx, macro_mode_lens: VoiceParamsBoolLens| {
-                // Clone inside Binding closure (Fn requires this)
-                let meters_inner = meters_for_main.clone();
-                let params_inner = params_for_main.clone();
-                let gui_ctx_inner = gui_context_for_main.clone();
-                let macro_mode = macro_mode_lens.get(cx);
+            move |cx, lens| {
+                let m = lens.get(cx);
+
+                let params_local = params_for_binding.clone();
+                let gui_local = gui_for_binding.clone();
+
                 HStack::new(cx, move |cx| {
-                    build_levels_column(cx, meters_inner.clone());
-                    if macro_mode {
-                        build_macro_column(cx, params_inner.clone(), gui_ctx_inner.clone());
-                        // Spacer to fill remaining space in Simple mode
-                        Element::new(cx).width(Stretch(1.0));
+                    // Each button gets its own clones so nothing is consumed
+                    let p1 = params_local.clone();
+                    let g1 = gui_local.clone();
+                    Button::new(
+                        cx,
+                        move |_| set_macro_mode(&p1, &g1, true),
+                        |cx| Label::new(cx, "Simple"),
+                    )
+                    .class(if m {
+                        "mode-button-active"
                     } else {
-                        build_clean_column(cx, params_inner.clone(), gui_ctx_inner.clone());
-                        build_polish_column(cx, params_inner.clone(), gui_ctx_inner.clone());
-                    }
+                        "mode-button"
+                    });
+
+                    let p2 = params_local.clone();
+                    let g2 = gui_local.clone();
+                    Button::new(
+                        cx,
+                        move |_| set_macro_mode(&p2, &g2, false),
+                        |cx| Label::new(cx, "Advanced"),
+                    )
+                    .class(if m {
+                        "mode-button"
+                    } else {
+                        "mode-button-active"
+                    });
                 })
-                .col_between(Pixels(24.0))
-                .class("main-view")
-                .child_left(Pixels(20.0))
-                .child_right(Pixels(20.0))
-                .child_top(Pixels(20.0))
-                .child_bottom(Pixels(12.0))
-                .width(Stretch(1.0))
-                .height(Stretch(1.0));
+                .class("mode-group");
             },
         );
+    })
+    .class("header");
+}
 
-        // --- FOOTER ---
-        HStack::new(cx, |cx| {
+fn build_footer(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
+    HStack::new(cx, move |cx| {
+        Label::new(cx, "Andrzej Marczewski Copyright 2026 version 1.0.2")
+            .class("copyright-text")
+            .class("child-space-stretch");
+
+        Element::new(cx).class("fill-width");
+
+        // Split clones for the footer buttons
+        let params_reset = params.clone();
+        let gui_reset = gui.clone();
+
+        HStack::new(cx, move |cx| {
             Button::new(
                 cx,
-                |_| {
-                    // Open the log file
+                move |_| {
+                    let path = if let Ok(mut p) = std::env::current_dir() {
+                        p.push("src/help.html");
+                        if p.exists() {
+                            p.to_string_lossy().to_string()
+                        } else {
+                            "src/help.html".to_string()
+                        }
+                    } else {
+                        "src/help.html".to_string()
+                    };
                     #[cfg(target_os = "macos")]
                     {
-                        // Touch the file first to create it if it doesn't exist
-                        let _ = std::process::Command::new("touch")
-                            .arg("/tmp/voice_studio.log")
-                            .status();
+                        let _ = std::process::Command::new("open").arg(&path).spawn();
+                    }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        let _ = std::process::Command::new("cmd")
+                            .arg("/c")
+                            .arg("start")
+                            .arg(&path)
+                            .spawn();
+                    }
+                },
+                |cx| Label::new(cx, "Help"),
+            )
+            .class("footer-button");
+
+            Button::new(
+                cx,
+                move |_| {
+                    let s = ParamSetter::new(gui_reset.as_ref());
+                    s.begin_set_parameter(&params_reset.noise_reduction);
+                    s.set_parameter(&params_reset.noise_reduction, 0.0);
+                    s.end_set_parameter(&params_reset.noise_reduction);
+
+                    s.begin_set_parameter(&params_reset.noise_tone);
+                    s.set_parameter(&params_reset.noise_tone, 0.5);
+                    s.end_set_parameter(&params_reset.noise_tone);
+
+                    s.begin_set_parameter(&params_reset.noise_mode);
+                    s.set_parameter(&params_reset.noise_mode, crate::presets::NoiseMode::Normal);
+                    s.end_set_parameter(&params_reset.noise_mode);
+
+                    s.begin_set_parameter(&params_reset.reverb_reduction);
+                    s.set_parameter(&params_reset.reverb_reduction, 0.0);
+                    s.end_set_parameter(&params_reset.reverb_reduction);
+
+                    s.begin_set_parameter(&params_reset.clarity);
+                    s.set_parameter(&params_reset.clarity, 0.0);
+                    s.end_set_parameter(&params_reset.clarity);
+
+                    s.begin_set_parameter(&params_reset.proximity);
+                    s.set_parameter(&params_reset.proximity, 0.0);
+                    s.end_set_parameter(&params_reset.proximity);
+
+                    s.begin_set_parameter(&params_reset.de_esser);
+                    s.set_parameter(&params_reset.de_esser, 0.0);
+                    s.end_set_parameter(&params_reset.de_esser);
+
+                    s.begin_set_parameter(&params_reset.leveler);
+                    s.set_parameter(&params_reset.leveler, 0.0);
+                    s.end_set_parameter(&params_reset.leveler);
+
+                    s.begin_set_parameter(&params_reset.output_gain);
+                    s.set_parameter(&params_reset.output_gain, 0.0);
+                    s.end_set_parameter(&params_reset.output_gain);
+
+                    s.begin_set_parameter(&params_reset.breath_control);
+                    s.set_parameter(&params_reset.breath_control, 0.25);
+                    s.end_set_parameter(&params_reset.breath_control);
+
+                    s.begin_set_parameter(&params_reset.use_ml);
+                    s.set_parameter(&params_reset.use_ml, true);
+                    s.end_set_parameter(&params_reset.use_ml);
+
+                    s.begin_set_parameter(&params_reset.use_dtln);
+                    s.set_parameter(&params_reset.use_dtln, false);
+                    s.end_set_parameter(&params_reset.use_dtln);
+
+                    s.begin_set_parameter(&params_reset.macro_mode);
+                    s.set_parameter(&params_reset.macro_mode, true);
+                    s.end_set_parameter(&params_reset.macro_mode);
+
+                    s.begin_set_parameter(&params_reset.macro_distance);
+                    s.set_parameter(&params_reset.macro_distance, 0.0);
+                    s.end_set_parameter(&params_reset.macro_distance);
+
+                    s.begin_set_parameter(&params_reset.macro_clarity);
+                    s.set_parameter(&params_reset.macro_clarity, 0.0);
+                    s.end_set_parameter(&params_reset.macro_clarity);
+
+                    s.begin_set_parameter(&params_reset.macro_consistency);
+                    s.set_parameter(&params_reset.macro_consistency, 0.0);
+                    s.end_set_parameter(&params_reset.macro_consistency);
+
+                    s.begin_set_parameter(&params_reset.final_output_preset);
+                    s.set_parameter(&params_reset.final_output_preset, OutputPreset::None);
+                    s.end_set_parameter(&params_reset.final_output_preset);
+
+                    s.begin_set_parameter(&params_reset.reset_all);
+                    s.set_parameter(&params_reset.reset_all, true);
+                    s.end_set_parameter(&params_reset.reset_all);
+
+                    s.begin_set_parameter(&params_reset.reset_all);
+                    s.set_parameter(&params_reset.reset_all, false);
+                    s.end_set_parameter(&params_reset.reset_all);
+                },
+                |cx| Label::new(cx, "Reset"),
+            )
+            .class("reset-button");
+
+            #[cfg(feature = "debug")]
+            Button::new(
+                cx,
+                move |_| {
+                    #[cfg(target_os = "macos")]
+                    {
                         let _ = std::process::Command::new("open")
                             .arg("-a")
                             .arg("Console")
@@ -1121,11 +1265,126 @@ pub fn build_ui(
                 },
                 |cx| Label::new(cx, "Log"),
             )
-            .class("log-button");
+            .class("footer-button");
+
+            #[cfg(feature = "debug")]
+            Button::new(
+                cx,
+                |cx| cx.emit(CssEditorEvent::OpenExternalEditor),
+                |cx| Label::new(cx, "Edit CSS"),
+            )
+            .class("footer-button");
+
+            #[cfg(feature = "debug")]
+            Button::new(
+                cx,
+                |cx| cx.emit(CssEditorEvent::ReloadStyles),
+                |cx| Label::new(cx, "Reload CSS"),
+            )
+            .class("footer-button");
         })
-        .class("footer");
+        .class("footer-buttons");
     })
-    .class("app-root")
-    .width(Stretch(1.0))
-    .height(Stretch(1.0));
+    .class("footer");
+}
+
+// ============================================================================
+// MAIN ENTRY
+// ============================================================================
+
+pub fn build_ui(
+    cx: &mut Context,
+    params: Arc<VoiceParams>,
+    meters: Arc<Meters>,
+    _ui_proxy: Arc<Mutex<Option<ContextProxy>>>,
+    gui_context: Arc<dyn GuiContext>,
+) {
+    #[cfg(feature = "debug")]
+    {
+        crate::debug::logger::init_logger();
+        let timer = cx.add_timer(Duration::from_millis(250), None, |_, action| {
+            if let TimerAction::Tick(_) = action {
+                crate::debug::logger::drain_to_file();
+            }
+        });
+        cx.start_timer(timer);
+    }
+
+    let _ = cx.add_stylesheet(STYLE);
+
+    #[cfg(feature = "debug")]
+    let css_temp_path = {
+        let css_path = resolve_theme_css_path()
+            .unwrap_or_else(|| std::env::temp_dir().join("voice_studio_ui.css"));
+
+        if !css_path.exists() {
+            if let Some(parent) = css_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            if let Err(e) = std::fs::write(&css_path, STYLE) {
+                eprintln!("Failed to write CSS file: {}", e);
+            }
+        }
+
+        let _ = cx.add_stylesheet(css_path.clone());
+        Arc::new(Mutex::new(css_path))
+    };
+
+    Data {
+        params: params.clone(),
+        #[cfg(feature = "debug")]
+        css_temp_path,
+    }
+    .build(cx);
+
+    // Root clones that stay owned by the top-level UI closure
+    let params_root = params.clone();
+    let meters_root = meters.clone();
+    let gui_root = gui_context.clone();
+
+    VStack::new(cx, move |cx| {
+        // HEADER
+        build_header(cx, params_root.clone(), gui_root.clone());
+
+        // BODY
+        let params_for_binding = params_root.clone();
+        let meters_for_binding = meters_root.clone();
+        let gui_for_binding = gui_root.clone();
+
+        Binding::new(
+            cx,
+            Data::params.map(|p| p.macro_mode.value()),
+            move |cx, lens| {
+                let simple = lens.get(cx);
+
+                // Clone inside Binding so we do not move captured Arcs into nested move closures
+                let params_local = params_for_binding.clone();
+                let meters_local = meters_for_binding.clone();
+                let gui_local = gui_for_binding.clone();
+
+                HStack::new(cx, move |cx| {
+                    build_levels(cx, meters_local.clone());
+
+                    let p = params_local.clone();
+                    let g = gui_local.clone();
+
+                    HStack::new(cx, move |cx| {
+                        if simple {
+                            build_macro(cx, p.clone(), g.clone());
+                            Element::new(cx).class("fill-width");
+                        } else {
+                            build_clean(cx, p.clone(), g.clone());
+                            build_polish(cx, p.clone(), g.clone());
+                        }
+                    })
+                    .class("columns-container");
+                })
+                .class("main-view");
+            },
+        );
+
+        // FOOTER
+        build_footer(cx, params_root.clone(), gui_root.clone());
+    })
+    .class("app-root");
 }

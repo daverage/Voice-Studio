@@ -4,10 +4,16 @@
 //! without killing tone. Targets early reflections that make recordings
 //! sound distant or boxy, while preserving the direct signal.
 //!
-//! # RESPONSIBILITY BOUNDARY: Early Reflections Only
+//! # Purpose
+//! Addresses the perception of distance in recordings by removing early reflections
+//! that contribute to a sense of roominess or boxiness, while maintaining the
+//! direct signal integrity.
 //!
-//! This module handles SHORT-LAG reflections (approximately 0–20ms):
-//! - Desk/table reflections (~3ms / ~1.0m)
+//! # Design Notes
+//! - Focuses on short-lag reflections (0-20ms) only
+//! - Preserves direct signal while removing early reflections
+//! - Works in parallel with other reverb processing modules
+//! - Maintains natural tone while reducing perceived distance
 //! - Nearby side walls (~7ms / ~2.4m)
 //! - Floor/ceiling (~12ms / ~4.1m)
 //! - Opposite wall in medium rooms (~18ms / ~6.2m)
@@ -45,7 +51,7 @@
 //! - No allocations during `process()`
 
 use super::speech_confidence::SpeechSidechain;
-use super::utils::{time_constant_coeff, DB_EPS};
+use super::utils::time_constant_coeff;
 
 // =============================================================================
 // Constants
@@ -208,7 +214,7 @@ impl EarlyReflectionSuppressor {
 
         // Proper normalized correlation
         let denom = (self.input_energy_acc * self.reflection_energy_acc).sqrt();
-        let norm_corr = if denom > DB_EPS {
+        let norm_corr = if denom > 1e-9 {
             (self.correlation_acc / denom).clamp(-1.0, 1.0)
         } else {
             0.0
