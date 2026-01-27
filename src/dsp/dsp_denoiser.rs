@@ -203,7 +203,7 @@ const MASKER_RADIUS_MAX: f32 = 10.0;
 const MASKER_ALPHA_MIN: f32 = 10.0;
 const MASKER_ALPHA_MAX: f32 = 4.0;
 // OLA normalization floor.
-const OLA_NORM_EPS: f32 = 1e-6;
+const OLA_NORM_EPS: f32 = 1e-3;
 
 // Decision-directed Wiener constants
 const DD_ALPHA: f32 = 0.98;

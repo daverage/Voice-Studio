@@ -237,9 +237,14 @@ impl DtlnDenoiser {
             };
 
             for i in 0..FRAME_SIZE {
-                // IMPORTANT: do NOT apply window again here.
-                // Windowing is already handled at analysis + synthesis stages.
-                let s = stage_output[i];
+                // td_stage1 is already windowed (synthesis window applied after iFFT).
+                // td_stage2 (neural network output) is NOT windowed - must apply synthesis window
+                // to prevent massive gain spikes at frame edges during OLA normalization.
+                let s = if stage2_ready {
+                    stage_output[i] * self.window[i] // Apply synthesis window to unwindowed NN output
+                } else {
+                    stage_output[i] // td_stage1 already windowed, don't double-window
+                };
                 self.overlap[i] += s;
                 self.ola_norm[i] += self.window[i] * self.window[i];
             }

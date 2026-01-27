@@ -11,3 +11,5 @@
 {"level":"info","ts":1769509297.066137,"caller":"app/app.go:94","msg":"Database connection closed."}
 {"level":"info","ts":1769509601.543474,"caller":"app/app.go:94","msg":"Database connection closed."}
 {"level":"info","ts":1769509932.810503,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"info","ts":1769512244.69965,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"info","ts":1769517872.71239,"caller":"app/app.go:94","msg":"Database connection closed."}
