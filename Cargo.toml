@@ -15,13 +15,7 @@ nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 
 assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid" }
 
-# Tract ML inference
 anyhow = "1.0"
-
-# Lightweight TensorFlow Lite interpreter
-# Note: Use `build` feature to compile TFLite from source (requires TFLITE_RS_MAKE_TARGET=osx on macOS)
-# After first successful build, switch back to default-features = false and set TFLITE_LIB_DIR
-tflite = { version = "0.9.8", default-features = false, features = ["build"], optional = true }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -41,12 +35,3 @@ hound = "3.4"
 default = []
 debug = ["assert_process_allocs"]
 assert_process_allocs = []
-tflite_validate = ["tflite"]
-
-[[bin]]
-name = "dtln_validate"
-path = "tools/dtln/validate.rs"
-required-features = ["tflite_validate"]
-
-[patch.crates-io]
-tflite = { path = "vendor/tflite-0.9.8" }

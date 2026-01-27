@@ -56,7 +56,6 @@ impl DspPreset {
             DspPreset::PodcastNoisy => Some(DspPresetValues {
                 // Based on optimization trial 0 (score: 0.5908, STOI: 96.7%)
                 noise_reduction: 0.35,
-                noise_mode: NoiseMode::Normal,
                 reverb_reduction: 0.60,
                 proximity: 0.05,
                 clarity: 0.15,
@@ -67,7 +66,6 @@ impl DspPreset {
             DspPreset::VoiceoverStudio => Some(DspPresetValues {
                 // Lighter settings for studio - minimal noise, natural proximity
                 noise_reduction: 0.20,
-                noise_mode: NoiseMode::Normal,
                 reverb_reduction: 0.40,
                 proximity: 0.10,
                 clarity: 0.20,
@@ -78,7 +76,6 @@ impl DspPreset {
             DspPreset::InterviewOutdoor => Some(DspPresetValues {
                 // Aggressive cleanup for outdoor/field recordings
                 noise_reduction: 0.55,
-                noise_mode: NoiseMode::Aggressive,
                 reverb_reduction: 0.75,
                 proximity: 0.0,
                 clarity: 0.10,
@@ -89,7 +86,6 @@ impl DspPreset {
             DspPreset::BroadcastClean => Some(DspPresetValues {
                 // Minimal processing for already-good audio
                 noise_reduction: 0.10,
-                noise_mode: NoiseMode::Normal,
                 reverb_reduction: 0.25,
                 proximity: 0.15,
                 clarity: 0.25,
@@ -111,43 +107,12 @@ impl Default for DspPreset {
 #[derive(Debug, Clone, Copy)]
 pub struct DspPresetValues {
     pub noise_reduction: f32,
-    pub noise_mode: NoiseMode,
     pub reverb_reduction: f32,
     pub proximity: f32,
     pub clarity: f32,
     pub de_esser: f32,
     pub leveler: f32,
     pub breath_control: f32,
-}
-
-// =============================================================================
-// NOISE MODE
-// =============================================================================
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum)]
-#[repr(usize)]
-pub enum NoiseMode {
-    #[serde(rename = "Normal")]
-    #[name = "Normal"]
-    Normal,
-    #[serde(rename = "Aggressive")]
-    #[name = "Aggressive"]
-    Aggressive,
-}
-
-impl NoiseMode {
-    pub fn name(&self) -> &'static str {
-        match self {
-            NoiseMode::Normal => "Normal",
-            NoiseMode::Aggressive => "Aggressive",
-        }
-    }
-}
-
-impl Default for NoiseMode {
-    fn default() -> Self {
-        NoiseMode::Normal
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum)]

@@ -7,9 +7,9 @@ mod ui;
 
 use crate::dsp::{
     Biquad, BreathReducer, ChannelProcessor, ClarityDetector, DeEsserDetector, DenoiseConfig,
-    EarlyReflectionSuppressor, LinkedCompressor, LinkedLimiter, PinkRefBias, PlosiveSoftener,
-    ProfileAnalyzer, SpectralGuardrails, SpeechConfidenceEstimator, SpeechExpander, SpeechHpf,
-    StereoStreamingDenoiser,
+    EarlyReflectionSuppressor, HissRumble, LinkedCompressor, LinkedLimiter, PinkRefBias,
+    PlosiveSoftener, ProfileAnalyzer, SpectralGuardrails, SpeechConfidenceEstimator,
+    SpeechExpander, SpeechHpf, StereoStreamingDenoiser, NoiseLearnRemove, NoiseLearnRemoveConfig,
 };
 use crate::macro_controller::{compute_simple_macro_targets, SimpleMacroTargets};
 use crate::meters::Meters;
@@ -224,8 +224,14 @@ pub struct VoiceParams {
     #[id = "noise_tone"]
     pub noise_tone: FloatParam,
 
-    #[id = "noise_mode"]
-    pub noise_mode: EnumParam<presets::NoiseMode>,
+    #[id = "noise_learn_amount"]
+    pub noise_learn_amount: FloatParam,
+
+    #[id = "noise_learn_trigger"]
+    pub noise_learn_trigger: BoolParam,
+
+    #[id = "noise_learn_clear"]
+    pub noise_learn_clear: BoolParam,
 
     #[id = "reverb_reduction"]
     pub reverb_reduction: FloatParam,
@@ -250,9 +256,6 @@ pub struct VoiceParams {
 
     #[id = "use_ml"]
     pub use_ml: BoolParam,
-
-    #[id = "use_dtln"]
-    pub use_dtln: BoolParam,
 
     // -------------------------------------------------------------------------
     // MACRO CONTROLS (Easy Mode)
@@ -335,6 +338,8 @@ struct VoiceStudioPlugin {
     early_reflection_r: EarlyReflectionSuppressor,
     speech_expander: SpeechExpander,
     spectral_guardrails: SpectralGuardrails,
+    hiss_rumble: HissRumble,
+    noise_learn_remove: NoiseLearnRemove,
 
     // Hidden hygiene and automatic protection
     speech_hpf: SpeechHpf,
@@ -377,9 +382,6 @@ struct VoiceStudioPlugin {
     de_ess_rms_sq_l: f32,
     de_ess_rms_sq_r: f32,
 
-    // DTLN availability tracking
-    dtln_available: bool,
-
     // Preset manager
     preset_manager: presets::PresetManager,
 
@@ -414,14 +416,26 @@ impl Default for VoiceStudioPlugin {
                 .with_smoother(SmoothingStyle::Linear(50.0)),
 
                 noise_tone: FloatParam::new(
-                    "Noise Tone",
+                    "Hiss / Rumble",
                     0.5,
                     FloatRange::Linear { min: 0.0, max: 1.0 },
                 )
                 .with_value_to_string(Arc::new(format_tone))
                 .with_smoother(SmoothingStyle::Linear(50.0)),
 
-                noise_mode: EnumParam::new("Noise Mode", presets::NoiseMode::Normal),
+                noise_learn_amount: FloatParam::new(
+                    "Static Noise",
+                    0.0,
+                    FloatRange::Linear { min: 0.0, max: 1.0 },
+                )
+                .with_smoother(SmoothingStyle::Linear(100.0))
+                .with_value_to_string(Arc::new(format_percent)),
+
+                noise_learn_trigger: BoolParam::new("Learn Noise", false)
+                    .non_automatable(),
+
+                noise_learn_clear: BoolParam::new("Clear Noise", false)
+                    .non_automatable(),
 
                 reverb_reduction: FloatParam::new(
                     "De-Verb (Room)",
@@ -480,8 +494,6 @@ impl Default for VoiceStudioPlugin {
 
                 use_ml: BoolParam::new("Use ML Advisor", true),
 
-                use_dtln: BoolParam::new("Use DTLN", false),
-
                 // Macro controls
                 macro_mode: BoolParam::new("Easy Mode", true), // Start in Simple mode
                 macro_distance: FloatParam::new(
@@ -532,6 +544,8 @@ impl Default for VoiceStudioPlugin {
             early_reflection_r: EarlyReflectionSuppressor::new(DEFAULT_SAMPLE_RATE),
             speech_expander: SpeechExpander::new(DEFAULT_SAMPLE_RATE),
             spectral_guardrails: SpectralGuardrails::new(DEFAULT_SAMPLE_RATE),
+            hiss_rumble: HissRumble::new(DEFAULT_SAMPLE_RATE),
+            noise_learn_remove: NoiseLearnRemove::new(2048, 512, DEFAULT_SAMPLE_RATE),
 
             speech_hpf: SpeechHpf::new(DEFAULT_SAMPLE_RATE),
             plosive_softener_l: PlosiveSoftener::new(DEFAULT_SAMPLE_RATE),
@@ -569,9 +583,6 @@ impl Default for VoiceStudioPlugin {
             peak_output_r: 0.0,
             de_ess_rms_sq_l: 0.0,
             de_ess_rms_sq_r: 0.0,
-
-            // Initially assume DTLN is not available until proven otherwise
-            dtln_available: false,
 
             // Preset manager (lightweight initialization)
             preset_manager: presets::PresetManager::empty(),
@@ -636,11 +647,6 @@ impl Plugin for VoiceStudioPlugin {
 
             // Core DSP modules
             self.denoiser = StereoStreamingDenoiser::new(2048, 512, self.sample_rate);
-            self.denoiser.prepare(self.sample_rate); // Load neural models safely here
-
-            // Update DTLN availability status based on whether models were loaded
-            self.dtln_available = self.denoiser.is_dtln_available();
-            self.meters.set_dtln_available(self.dtln_available);
 
             self.pink_ref_bias = PinkRefBias::new(self.sample_rate);
             self.clarity_detector = ClarityDetector::new(self.sample_rate);
@@ -654,6 +660,8 @@ impl Plugin for VoiceStudioPlugin {
             self.early_reflection_r = EarlyReflectionSuppressor::new(self.sample_rate);
             self.speech_expander = SpeechExpander::new(self.sample_rate);
             self.spectral_guardrails = SpectralGuardrails::new(self.sample_rate);
+            self.hiss_rumble = HissRumble::new(self.sample_rate);
+            self.noise_learn_remove = NoiseLearnRemove::new(2048, 512, self.sample_rate);
 
             self.speech_hpf = SpeechHpf::new(self.sample_rate);
             self.plosive_softener_l = PlosiveSoftener::new(self.sample_rate);
@@ -768,6 +776,8 @@ impl Plugin for VoiceStudioPlugin {
             self.early_reflection_r.reset();
             self.speech_expander.reset();
             self.spectral_guardrails.reset();
+            self.hiss_rumble.reset();
+            self.noise_learn_remove.reset();
             self.speech_hpf.reset();
             self.plosive_softener_l.reset();
             self.plosive_softener_r.reset();
@@ -776,10 +786,6 @@ impl Plugin for VoiceStudioPlugin {
             self.input_profile_analyzer.reset();
             self.output_profile_analyzer.reset();
             self.meters.reset();
-
-            // Update DTLN availability status after reset
-            self.dtln_available = self.denoiser.is_dtln_available();
-            self.meters.set_dtln_available(self.dtln_available);
 
             self.preset_gain_db = 0.0;
             self.preset_gain_lin = 1.0;
@@ -1011,15 +1017,11 @@ impl VoiceStudioPlugin {
         let total_deverb = (reverb_amt - prox_reduction).clamp(0.0, 1.0);
 
         // Configs
-        let noise_mode_dtln = self.params.noise_mode.value() == presets::NoiseMode::Aggressive;
-        let use_dtln = self.params.use_dtln.value() || noise_mode_dtln;
-
         let denoise_cfg = DenoiseConfig {
             amount: noise_amt,
             sensitivity: (0.2 + 0.8 * noise_amt).clamp(0.2, 1.0),
             tone: noise_tone,
             sample_rate: self.sample_rate,
-            use_dtln,
             speech_confidence: 0.5, // Will be updated per-sample with actual sidechain value
         };
 
@@ -1041,7 +1043,6 @@ impl VoiceStudioPlugin {
 
         let frame_count = self.current_block_size;
 
-        let dtln_update_stride = (frame_count / 10).max(1);
         for idx in 0..frame_count {
             let input_l = left[idx];
             let input_r = right[idx];
@@ -1055,18 +1056,36 @@ impl VoiceStudioPlugin {
             // Removes subsonic energy before any analysis or processing
             let (hpf_l, hpf_r) = self.speech_hpf.process(input_l, input_r);
 
+            // 0d. SPEECH CONFIDENCE (sidechain analysis - no audio modification)
+            // Must be computed from HPF, not noise-reduced audio
+            let sidechain = self.speech_confidence.process(hpf_l, hpf_r);
+
+            // 0x. NOISE LEARN REMOVE (Static Noise)
+            // Independent of speech, works during silence
+            let nlr_cfg = NoiseLearnRemoveConfig {
+                enabled: self.params.noise_learn_amount.value() > 0.001,
+                amount: self.params.noise_learn_amount.value(),
+                learn: self.params.noise_learn_trigger.value(),
+                clear: self.params.noise_learn_clear.value(),
+            };
+            let (nlr_l, nlr_r) = self.noise_learn_remove.process(hpf_l, hpf_r, nlr_cfg, &sidechain);
+
             // 0b. ENVELOPE TRACKING (Unified Source of Truth)
-            // Tracks hygiene-filtered input dynamics before any processing
-            let env_l = self.process_l.envelope_tracker.process_sample(hpf_l);
-            let env_r = self.process_r.envelope_tracker.process_sample(hpf_r);
+            // Tracks dynamics after static noise removal for better expander/gate behavior
+            let env_l = self.process_l.envelope_tracker.process_sample(nlr_l);
+            let env_r = self.process_r.envelope_tracker.process_sample(nlr_r);
 
             // 0c. INPUT PROFILE ANALYSIS (for data-driven calibration)
             // INVARIANT: Only pre-restoration samples are analyzed here
             // INVARIANT: This feeds condition detection and macro calibration
+            // We use HPF signal to capture true noise floor for environment detection
             self.input_profile_analyzer.process(hpf_l, hpf_r);
 
-            // 0d. SPEECH CONFIDENCE (sidechain analysis - no audio modification)
-            let sidechain = self.speech_confidence.process(hpf_l, hpf_r);
+            // Apply real hiss/rumble shaping here
+            // Uses NLR output as base
+            let (hr_l, hr_r) = self
+                .hiss_rumble
+                .process(nlr_l, nlr_r, noise_tone, &sidechain);
 
             // Track pre-processed speech band energy - Removed unused calculation
 
@@ -1085,13 +1104,13 @@ impl VoiceStudioPlugin {
             let early_reflection_amt = (reverb_amt * 0.5).clamp(0.0, 1.0);
 
             let (pre_l, pre_r) = if bypass_restoration || early_reflection_amt < 0.001 {
-                (hpf_l, hpf_r)
+                (hr_l, hr_r) // Use hiss/rumble processed signal
             } else {
                 (
                     self.early_reflection_l
-                        .process(hpf_l, early_reflection_amt, &sidechain),
+                        .process(hr_l, early_reflection_amt, &sidechain),
                     self.early_reflection_r
-                        .process(hpf_r, early_reflection_amt, &sidechain),
+                        .process(hr_r, early_reflection_amt, &sidechain),
                 )
             };
 
@@ -1388,13 +1407,6 @@ impl VoiceStudioPlugin {
 
             left[idx] = out_l;
             right[idx] = out_r;
-            if idx % dtln_update_stride == 0 {
-                let current_dtln_available = self.denoiser.is_dtln_available();
-                if current_dtln_available != self.dtln_available {
-                    self.dtln_available = current_dtln_available;
-                    self.meters.set_dtln_available(current_dtln_available);
-                }
-            }
         }
 
         // =====================================================================
@@ -1564,6 +1576,9 @@ impl VoiceStudioPlugin {
         self.meters.set_gain_reduction_l(gr_db);
         self.meters.set_gain_reduction_r(gr_db);
 
+        // Update Quality Meter
+        self.meters.set_noise_learn_quality(self.noise_learn_remove.get_quality());
+
         // =====================================================================
         // DEBUG METERS - for DSP analysis and tuning
         // =====================================================================
@@ -1597,6 +1612,12 @@ impl VoiceStudioPlugin {
         // Speech expander attenuation
         self.meters
             .set_debug_expander_atten_db(self.speech_expander.get_gain_reduction_db());
+
+        // Hiss/Rumble processor debug meters
+        self.meters
+            .set_hiss_db_current(self.hiss_rumble.get_hiss_db_current());
+        self.meters
+            .set_rumble_hz_current(self.hiss_rumble.get_rumble_hz_current());
 
         // Detect sudden loudness compensation + limiter movement ("pumping")
         let prev_gain = self.prev_loudness_comp_gain.max(1e-6);

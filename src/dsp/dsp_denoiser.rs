@@ -1,17 +1,17 @@
-//! DSP Denoiser (Wiener + ML Advisor)
+//! DSP Denoiser (Wiener + Adaptive Advisor)
 //!
-//! Traditional spectral denoiser using Wiener filtering with optional ML-based
-//! advisory for improved speech probability estimation. Reduces stationary
-//! background noise while preserving voice timbre and intelligibility.
+//! Traditional spectral denoiser using Wiener filtering with adaptive speech
+//! probability estimation to reduce stationary background noise while preserving
+//! voice timbre and intelligibility.
 //!
 //! # Purpose
 //! Reduce stationary background noise (hiss, hum, fan noise) while preserving
 //! voice timbre and maintaining speech intelligibility. Optionally enhanced
-//! with ML-based advisory for more intelligent noise reduction.
+//! with adaptive spectral advisory for more intelligent noise reduction.
 //!
 //! # Design Notes
 //! - Uses traditional Wiener filtering approach
-//! - Optional ML advisor for improved speech probability estimation
+//! - Optional adaptive advisor for improved speech probability estimation
 //! - Focuses on stationary noise reduction
 //! - Preserves voice characteristics and intelligibility
 //!   - Remove non-stationary noise like dog barks, sirens, or keyboard clicks.
@@ -28,7 +28,7 @@
 //!
 //! 1. **Statistics**: Uses STFT magnitude estimation with a shared mono proxy.
 //! 2. **Noise Floor**: Tracked using minimum statistics with speech-conditioned ballistics.
-//! 3. **Speech Presence (ML Advisor)**: Per-bin speech probability masks from `MlDenoiseEngine`.
+//! 3. **Speech Presence Detection**: Per-bin speech probability masks derived from spectral heuristics.
 //! 4. **Wiener Gain**: Decision-directed estimation of a-priori SNR (xi) used to build the Wiener gain curve.
 //! 5. **Adaptive Masking**: Heuristic psychoacoustic masking based on spectral peaks.
 //!
@@ -61,8 +61,6 @@ use crate::dsp::utils::{
 use ringbuf::{Consumer, Producer, RingBuffer};
 use rustfft::{num_complex::Complex, Fft, FftPlanner};
 use std::sync::Arc;
-
-use crate::dsp::denoiser::StereoDenoiser;
 
 // Constants: unless marked "Must not change", these are tunable for behavior.
 
@@ -252,7 +250,6 @@ pub struct DenoiseConfig {
     pub sensitivity: f32,
     pub tone: f32,
     pub sample_rate: f32,
-    pub use_dtln: bool,         // Toggle to switch between DSP and DTLN
     pub speech_confidence: f32, // Speech confidence for adaptive behavior
 }
 
@@ -351,7 +348,6 @@ struct DspDenoiserDetector {
     masker_buf: Vec<f32>,
 
     frame_time: Vec<f32>,
-    peaks_buf: Vec<(usize, f32)>,
     f0_scratch: Vec<f32>,
 
     noise_confidence: f32,
@@ -404,8 +400,7 @@ impl DspDenoiserDetector {
             masker_buf: vec![0.0; nyq + 1],
 
             frame_time: vec![0.0; win_size],
-            peaks_buf: Vec::with_capacity(MASKER_MAX_PEAKS),
-            f0_scratch: vec![0.0; win_size], // Changed from Vec::with_capacity to pre-allocated vector
+            f0_scratch: vec![0.0; win_size], // pre-allocated vector
             noise_confidence: 1.0,
             prev_rms: 0.0,
             transient_hold: 0,
@@ -587,7 +582,7 @@ impl DspDenoiserDetector {
                 db_to_gain(TONE_BIAS_DB * t * freq_fraction)
             };
 
-            // Speech weighting: Fusing DSP and ML cues per bin
+            // Speech weighting: combining DSP-derived cues per bin
             let band_weight = if voiced {
                 let mid = bell(freq_fraction, VOICED_MID_CENTER, VOICED_MID_WIDTH);
                 VOICED_SPEECH_BASE + VOICED_SPEECH_RANGE * mid
@@ -958,33 +953,9 @@ impl DspDenoiserDetector {
 }
 
 impl DspDenoiser {
-    pub fn reset_internal(&mut self) {
-        // Reset both channels
+    pub fn reset(&mut self) {
         self.chan_l.reset();
         self.chan_r.reset();
-    }
-}
-
-impl StereoDenoiser for DspDenoiser {
-    fn process_sample(&mut self, input_l: f32, input_r: f32, amount: f32) -> (f32, f32) {
-        // We need to adapt the interface - the original method takes a config struct
-        // Create a temporary config with the amount parameter
-        use crate::dsp::dsp_denoiser::DenoiseConfig;
-        let temp_config = DenoiseConfig {
-            amount,
-            sensitivity: 0.5,       // default
-            tone: 0.5,              // default
-            sample_rate: 44100.0,   // default, will be overridden by actual processing
-            use_dtln: false,        // we're in DSP mode
-            speech_confidence: 0.5, // default
-        };
-
-        self.process_sample(input_l, input_r, &temp_config)
-    }
-
-    fn reset(&mut self) {
-        // Call the actual reset method
-        self.reset_internal();
     }
 }
 

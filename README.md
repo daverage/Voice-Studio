@@ -10,7 +10,7 @@ It focuses on improving clarity, consistency, and intelligibility without turnin
 
 ## Architecture
 
-Voice Studio uses a hybrid approach, combining traditional high-precision DSP with neural network (DTLN) processing for broadband noise suppression. The DTLN engine is a core part of the plugin and is optimized for CPU inference to ensure maximum stability and cross-platform compatibility.
+Voice Studio is built around a tightly integrated DSP restoration pipeline that emphasizes deterministic behavior, low latency, and professional speech restoration without relying on neural models.
 
 ### DSP Pipeline
 
@@ -28,7 +28,6 @@ Voice Studio uses a hybrid approach, combining traditional high-precision DSP wi
 
 - **Simple Mode**: Intent-based macro controls (Distance, Clarity, Consistency) for rapid results.
 - **Advanced Mode**: Granular access to every stage of the restoration and dynamics chain.
-- **Neural Denoising**: Embedded DTLN models for professional-grade noise suppression.
 - **Global Reset**: Instantly clear all DSP state and return to defaults.
 - **Delivery Presets**: Built-in loudness targeting for YouTube, Spotify, and Broadcast standards.
 
@@ -37,15 +36,6 @@ Voice Studio uses a hybrid approach, combining traditional high-precision DSP wi
 ### Prerequisites
 - Rust 1.70+
 - `cargo-nih-plug` (install with `cargo install cargo-nih-plug`)
-
-### macOS TensorFlow Lite setup
-The crate now links against a prebuilt TensorFlow Lite library, so builds skip `bindgen` and the makefile entirely. Before running `cargo` you must point the build script at a native `.a` (or `.dylib`) by exporting:
-
-```
-export TFLITE_LIB_DIR=/path/to/libtensorflow-lite.a
-```
-
-If you have an architecture-specific build (e.g., `aarch64-apple-darwin`), you can also set `TFLITE_AARCH64_APPLE_DARWIN_LIB_DIR`. After that any of the normal commands will link that binary instead of rebuilding TFLite.
 
 ### Commands
 
@@ -71,7 +61,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Acknowledgments
 
 - Built with the [nih-plug](https://github.com/robbert-vdh/nih-plug) framework.
-- Neural inference powered by [tract](https://github.com/snipsco/tract).
 - UI built with [vizia](https://github.com/vizia/vizia).
 
 
@@ -80,4 +69,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 When using tinyMem as an MCP server for AI agents, ensure that your agents follow the MANDATORY TINYMEM CONTROL PROTOCOL.
 
 Include the contract content from [AGENT_CONTRACT.md](AGENT_CONTRACT.md) in your agent's system prompt to ensure proper interaction with tinyMem.
-

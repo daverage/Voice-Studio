@@ -37,14 +37,11 @@ pub mod de_esser;
 pub mod denoiser;
 pub mod deverber;
 pub mod dsp_denoiser;
-pub mod dtln_core;
-pub mod dtln_denoiser;
-#[cfg(feature = "tflite_validate")]
-pub mod dtln_denoiser_tflite;
-pub mod dtln_weights;
 pub mod early_reflection;
 pub mod envelope;
+pub mod hiss_rumble;
 pub mod limiter;
+pub mod noise_learn_remove;
 pub mod pink_ref_bias;
 pub mod plosive_softener;
 pub mod profile_analyzer;
@@ -54,6 +51,7 @@ pub mod speech_confidence;
 pub mod speech_expander;
 pub mod speech_hpf;
 pub mod utils;
+pub use noise_learn_remove::{NoiseLearnRemove, NoiseLearnRemoveConfig};
 
 pub use biquad::Biquad;
 pub use breath_reducer::BreathReducer;
@@ -63,12 +61,9 @@ pub use control_slew::SpectralControlLimiters;
 pub use de_esser::{DeEsserBand, DeEsserDetector};
 pub use denoiser::{DenoiseConfig, StereoStreamingDenoiser};
 pub use deverber::StreamingDeverber;
-pub use dtln_core::DtlnCore;
-#[cfg(feature = "tflite_validate")]
-pub use dtln_denoiser_tflite::StereoDtlnDenoiserTflite;
-pub use dtln_weights::{DtlnWeights, DTLN_WEIGHTS};
 pub use early_reflection::EarlyReflectionSuppressor;
 pub use envelope::VoiceEnvelopeTracker;
+pub use hiss_rumble::HissRumble;
 pub use limiter::LinkedLimiter;
 pub use pink_ref_bias::PinkRefBias;
 pub use plosive_softener::PlosiveSoftener;

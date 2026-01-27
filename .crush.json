@@ -1,0 +1,28 @@
+{
+  "mcp": {
+    "tinymem": {
+      "type": "stdio",
+      "command": "tinymem",
+      "args": ["mcp"],
+      "timeout": 120,
+      "env": {
+        "TINYMEM_METRICS_ENABLED": "true"
+      }
+    }
+  },
+  "providers": {
+    "lmstudio": {
+      "name": "LM Studio",
+      "base_url": "http://localhost:8080/v1",
+      "type": "openai-compat",
+      "models": [
+        {
+          "name": "rnj",
+          "id": "unsloth/rnj-1-instruct",
+          "context_window": 256000,
+          "default_max_tokens": 20000
+        }
+      ]
+    }
+  }
+}

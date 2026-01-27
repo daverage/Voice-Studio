@@ -13,3 +13,9 @@
 {"level":"info","ts":1769509932.810503,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
 {"level":"info","ts":1769512244.69965,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
 {"level":"info","ts":1769517872.71239,"caller":"app/app.go:94","msg":"Database connection closed."}
+{"level":"info","ts":1769520647.295935,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"info","ts":1769521048.7154078,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"info","ts":1769521127.122887,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"info","ts":1769521359.887085,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"info","ts":1769524661.177258,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"info","ts":1769524693.711733,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}

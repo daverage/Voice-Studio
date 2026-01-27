@@ -61,6 +61,12 @@ pub struct Meters {
     debug_noise_floor_db: AtomicU32,
     /// Speech expander attenuation in dB
     debug_expander_atten_db: AtomicU32,
+    /// Current hiss reduction in dB
+    hiss_db_current: AtomicU32,
+    /// Current rumble frequency in Hz
+    rumble_hz_current: AtomicU32,
+    /// Static noise learn quality (0.0 - 1.0)
+    noise_learn_quality: AtomicU32,
 
     // Layer 1: Resolved Parameters
     pub(crate) noise_reduction_resolved: AtomicF32,
@@ -94,9 +100,6 @@ pub struct Meters {
     pub(crate) params_hash_after: AtomicU64,
     pub(crate) audible_change_detected: AtomicI32,
     pub(crate) pre_switch_audible_rms: AtomicF32,
-
-    // DTLN availability status
-    pub(crate) dtln_available: AtomicI32,
 
     // Pump detection meters
     pub(crate) pump_event_count: AtomicI32,
@@ -243,6 +246,36 @@ impl Meters {
         f32::from_bits(self.debug_expander_atten_db.load(Ordering::Relaxed))
     }
 
+    #[allow(dead_code)]
+    pub fn set_hiss_db_current(&self, val: f32) {
+        self.hiss_db_current.store(val.to_bits(), Ordering::Relaxed);
+    }
+
+    #[allow(dead_code)]
+    pub fn get_hiss_db_current(&self) -> f32 {
+        f32::from_bits(self.hiss_db_current.load(Ordering::Relaxed))
+    }
+
+    #[allow(dead_code)]
+    pub fn set_rumble_hz_current(&self, val: f32) {
+        self.rumble_hz_current
+            .store(val.to_bits(), Ordering::Relaxed);
+    }
+
+    #[allow(dead_code)]
+    pub fn get_rumble_hz_current(&self) -> f32 {
+        f32::from_bits(self.rumble_hz_current.load(Ordering::Relaxed))
+    }
+
+    pub fn set_noise_learn_quality(&self, val: f32) {
+        self.noise_learn_quality
+            .store(val.to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn get_noise_learn_quality(&self) -> f32 {
+        f32::from_bits(self.noise_learn_quality.load(Ordering::Relaxed))
+    }
+
     // =========================================================================
     // Pump Detection Meters
     // =========================================================================
@@ -302,6 +335,8 @@ impl Meters {
             .store(0.0f32.to_bits(), Ordering::Relaxed);
         self.debug_expander_atten_db
             .store(0.0f32.to_bits(), Ordering::Relaxed);
+        self.noise_learn_quality
+            .store(0.0f32.to_bits(), Ordering::Relaxed);
 
         self.noise_reduction_resolved.store(0.0, Ordering::Relaxed);
         self.noise_tone_resolved.store(0.0, Ordering::Relaxed);
@@ -331,14 +366,5 @@ impl Meters {
         self.params_hash_after.store(0, Ordering::Relaxed);
         self.audible_change_detected.store(0, Ordering::Relaxed);
         self.pre_switch_audible_rms.store(-80.0, Ordering::Relaxed);
-    }
-
-    pub fn set_dtln_available(&self, available: bool) {
-        self.dtln_available
-            .store(if available { 1 } else { 0 }, Ordering::Relaxed);
-    }
-
-    pub fn is_dtln_available(&self) -> bool {
-        self.dtln_available.load(Ordering::Relaxed) != 0
     }
 }

@@ -319,14 +319,7 @@ mod tests {
 
         // Process very quiet signal with proper envelope
         for _ in 0..10000 {
-            expander.process(
-                0.0001,
-                0.0001,
-                1.0,
-                &sidechain,
-                &quiet_env,
-                &quiet_env,
-            );
+            expander.process(0.0001, 0.0001, 1.0, &sidechain, &quiet_env, &quiet_env);
         }
 
         // Should see some gain reduction

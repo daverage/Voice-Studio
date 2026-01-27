@@ -29,7 +29,6 @@ Factory presets provide starting points for common voice restoration scenarios. 
 
 #### Podcast (Noisy Room) - Based on optimization results (STOI: 96.7%)
 - Noise Reduction: 35%
-- Noise Mode: Normal (DSP-based)
 - Reverb Reduction: 60%
 - Proximity: 5%
 - Clarity: 15%
@@ -39,7 +38,6 @@ Factory presets provide starting points for common voice restoration scenarios. 
 
 #### Voiceover (Studio) - Lighter settings for studio environments
 - Noise Reduction: 20%
-- Noise Mode: Normal
 - Reverb Reduction: 40%
 - Proximity: 10%
 - Clarity: 20%
@@ -49,7 +47,6 @@ Factory presets provide starting points for common voice restoration scenarios. 
 
 #### Interview (Outdoor) - Aggressive cleanup for field recordings
 - Noise Reduction: 55%
-- Noise Mode: Aggressive (DTLN neural network)
 - Reverb Reduction: 75%
 - Proximity: 0%
 - Clarity: 10%
@@ -59,7 +56,6 @@ Factory presets provide starting points for common voice restoration scenarios. 
 
 #### Broadcast (Clean) - Minimal processing for professional audio
 - Noise Reduction: 10%
-- Noise Mode: Normal
 - Reverb Reduction: 25%
 - Proximity: 15%
 - Clarity: 25%

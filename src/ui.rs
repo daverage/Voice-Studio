@@ -18,15 +18,15 @@ use std::sync::{Arc, Mutex};
 #[cfg(feature = "debug")]
 use std::time::Duration;
 
-// ============================================================================
+// ============================================================================ 
 // STYLES
-// ============================================================================
+// ============================================================================ 
 
 const STYLE: &str = include_str!("ui.css");
 
-// ============================================================================
+// ============================================================================ 
 // DATA MODEL
-// ============================================================================
+// ============================================================================ 
 
 #[derive(Lens, Clone)]
 pub struct Data {
@@ -129,9 +129,9 @@ pub enum CssEditorEvent {
 #[allow(dead_code)]
 type VoiceParamsBoolLens = Map<Wrapper<data_derived_lenses::params>, bool>;
 
-// ============================================================================
+// ============================================================================ 
 // METERS
-// ============================================================================
+// ============================================================================ 
 
 #[cfg(feature = "debug")]
 fn resolve_theme_css_path() -> Option<std::path::PathBuf> {
@@ -207,19 +207,13 @@ impl View for LevelMeter {
 
             let paint = if is_gr {
                 vg::Paint::linear_gradient(
-                    b.x,
-                    b.y,
-                    b.x,
-                    b.y + b.h,
+                    b.x, b.y, b.x, b.y + b.h,
                     vg::Color::rgb(239, 68, 68),
                     vg::Color::rgb(249, 115, 22),
                 )
             } else {
                 vg::Paint::linear_gradient(
-                    b.x,
-                    b.y + b.h,
-                    b.x,
-                    b.y,
+                    b.x, b.y + b.h, b.x, b.y,
                     vg::Color::rgb(34, 197, 94),
                     vg::Color::rgb(239, 68, 68),
                 )
@@ -244,9 +238,62 @@ impl View for LevelMeter {
     }
 }
 
-// ============================================================================
+// ============================================================================ 
+// NOISE LEARN QUALITY METER
+// ============================================================================ 
+
+pub struct NoiseLearnQualityMeter {
+    meters: Arc<Meters>,
+}
+
+impl NoiseLearnQualityMeter {
+    pub fn new(cx: &mut Context, meters: Arc<Meters>) -> Handle<'_, Self> {
+        Self { meters }.build(cx, |_| {})
+    }
+}
+
+impl View for NoiseLearnQualityMeter {
+    fn element(&self) -> Option<&'static str> {
+        Some("noise-learn-meter")
+    }
+
+    fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        let b = cx.bounds();
+        let quality = self.meters.get_noise_learn_quality().clamp(0.0, 1.0);
+
+        // Background
+        let mut bg = vg::Path::new();
+        bg.rounded_rect(b.x, b.y, b.w, b.h, 2.0);
+        canvas.fill_path(&bg, &vg::Paint::color(vg::Color::rgb(30, 41, 59)));
+        
+        // Fill based on quality
+        if quality > 0.01 {
+            let mut fill = vg::Path::new();
+            fill.rounded_rect(b.x, b.y, b.w * quality, b.h, 2.0);
+            
+            // Color logic: < 0.3 grey, 0.3-0.7 yellow, > 0.7 green
+            let color = if quality < 0.3 {
+                vg::Color::rgb(100, 116, 139) // Slate-500
+            } else if quality < 0.7 {
+                vg::Color::rgb(234, 179, 8) // Yellow-500
+            } else {
+                vg::Color::rgb(34, 197, 94) // Green-500
+            };
+            
+            canvas.fill_path(&fill, &vg::Paint::color(color));
+        }
+        
+        // Border
+        canvas.stroke_path(
+            &bg,
+            &vg::Paint::color(vg::Color::rgb(71, 85, 105)).with_line_width(1.0),
+        );
+    }
+}
+
+// ============================================================================ 
 // EFFECT ACTIVITY LEDS (shows how much processing is happening)
-// ============================================================================
+// ============================================================================ 
 
 pub struct NoiseFloorLeds {
     meters: Arc<Meters>,
@@ -321,14 +368,15 @@ impl View for NoiseFloorLeds {
     }
 }
 
-// ============================================================================
+// ============================================================================ 
 // SLIDER VISUALS + DIAL VISUALS
-// ============================================================================
+// ============================================================================ 
 
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum ParamId {
     NoiseReduction,
     NoiseTone,
+    NoiseLearnAmount,
     ReverbReduction,
     Clarity,
     Proximity,
@@ -362,6 +410,7 @@ impl View for SliderVisuals {
         let val = match self.param_id {
             ParamId::NoiseReduction => self.params.noise_reduction.modulated_normalized_value(),
             ParamId::NoiseTone => self.params.noise_tone.modulated_normalized_value(),
+            ParamId::NoiseLearnAmount => self.params.noise_learn_amount.modulated_normalized_value(),
             ParamId::ReverbReduction => self.params.reverb_reduction.modulated_normalized_value(),
             ParamId::Clarity => self.params.clarity.modulated_normalized_value(),
             ParamId::Proximity => self.params.proximity.modulated_normalized_value(),
@@ -493,9 +542,9 @@ impl View for DialVisuals {
     }
 }
 
-// ============================================================================
+// ============================================================================ 
 // WIDGET HELPERS
-// ============================================================================
+// ============================================================================ 
 
 fn create_slider<'a, P>(
     cx: &'a mut Context,
@@ -655,8 +704,7 @@ fn create_dsp_preset_dropdown<'a>(
                         DspPreset::InterviewOutdoor,
                         DspPreset::BroadcastClean,
                     ]
-                    .iter()
-                    {
+                    .iter() {
                         let preset_value = *preset;
                         let params_item = params_list.clone();
                         let gui_item = gui_list.clone();
@@ -680,17 +728,6 @@ fn create_dsp_preset_dropdown<'a>(
                                         values.noise_reduction,
                                     );
                                     setter.end_set_parameter(&params_item.noise_reduction);
-
-                                    setter.begin_set_parameter(&params_item.noise_mode);
-                                    setter
-                                        .set_parameter(&params_item.noise_mode, values.noise_mode);
-                                    setter.end_set_parameter(&params_item.noise_mode);
-
-                                    let dtln_enabled =
-                                        values.noise_mode == crate::presets::NoiseMode::Aggressive;
-                                    setter.begin_set_parameter(&params_item.use_dtln);
-                                    setter.set_parameter(&params_item.use_dtln, dtln_enabled);
-                                    setter.end_set_parameter(&params_item.use_dtln);
 
                                     setter.begin_set_parameter(&params_item.reverb_reduction);
                                     setter.set_parameter(
@@ -772,9 +809,9 @@ fn sync_advanced_from_macros(params: &Arc<VoiceParams>, gui_context: &Arc<dyn Gu
     macro_controller::apply_simple_macros(params.as_ref(), &setter);
 }
 
-// ============================================================================
+// ============================================================================ 
 // BUILDERS
-// ============================================================================
+// ============================================================================ 
 
 fn build_levels(cx: &mut Context, meters: Arc<Meters>) {
     // IMPORTANT: break Arc<Meters> into independent clones so nested move closures don't "consume" it
@@ -913,7 +950,6 @@ fn build_clean(
     gui: Arc<dyn GuiContext>,
     meters: Arc<Meters>,
 ) {
-    let meters_indicator = meters.clone();
     VStack::new(cx, move |cx| {
         Label::new(cx, "CLEAN & REPAIR")
             .class("column-header")
@@ -928,76 +964,6 @@ fn build_clean(
             |p| &p.noise_reduction,
         );
 
-        // Noise Mode Toggle (Normal/Aggressive)
-        let params_toggle = params.clone();
-        let gui_toggle = gui.clone();
-        HStack::new(cx, move |cx| {
-            Label::new(cx, "Mode").class("toggle-label");
-
-            Binding::new(
-                cx,
-                Data::params.map(|p| p.use_dtln.value()),
-                move |cx, is_dtln| {
-                    let aggressive = is_dtln.get(cx);
-                    let p1 = params_toggle.clone();
-                    let g1 = gui_toggle.clone();
-
-                    Button::new(
-                        cx,
-                        move |_| {
-                            let setter = ParamSetter::new(g1.as_ref());
-                            let new_dtln = !aggressive;
-                            let new_mode = if new_dtln {
-                                crate::presets::NoiseMode::Aggressive
-                            } else {
-                                crate::presets::NoiseMode::Normal
-                            };
-                            setter.begin_set_parameter(&p1.noise_mode);
-                            setter.set_parameter(&p1.noise_mode, new_mode);
-                            setter.end_set_parameter(&p1.noise_mode);
-
-                            setter.begin_set_parameter(&p1.use_dtln);
-                            setter.set_parameter(&p1.use_dtln, new_dtln);
-                            setter.end_set_parameter(&p1.use_dtln);
-                        },
-                        move |cx| Label::new(cx, if aggressive { "Aggressive" } else { "Normal" }),
-                    )
-                    .class(if aggressive {
-                        "mode-toggle-active"
-                    } else {
-                        "mode-toggle"
-                    });
-                },
-            );
-        })
-        .class("toggle-row");
-
-        // DTLN Availability Indicator
-        HStack::new(cx, move |cx| {
-            Label::new(cx, "").class("dtln-indicator-label"); // Empty label for alignment
-
-            Binding::new(
-                cx,
-                Data::params.map(|p| p.use_dtln.value()),
-                move |cx, lens| {
-                    let dtln_enabled = lens.get(cx);
-                    let dtln_available = meters_indicator.is_dtln_available();
-
-                    HStack::new(cx, move |cx| {
-                        if dtln_enabled && !dtln_available {
-                            Label::new(cx, "DTLN Unavailable").class("dtln-warning");
-                        } else if dtln_enabled {
-                            Label::new(cx, "DTLN Active").class("dtln-active");
-                        } else {
-                            Label::new(cx, "DSP Active").class("dtln-inactive");
-                        }
-                    })
-                    .class("dtln-status-container");
-                },
-            );
-        })
-        .class("dtln-indicator-row");
-
         create_slider(
             cx,
             "Tone",
@@ -1006,6 +972,88 @@ fn build_clean(
             ParamId::NoiseTone,
             |p| &p.noise_tone,
         );
+
+        // Static Noise Learn/Remove Section
+        VStack::new(cx, |cx| {
+            create_slider(
+                cx,
+                "Static Noise",
+                params.clone(),
+                gui.clone(),
+                ParamId::NoiseLearnAmount,
+                |p| &p.noise_learn_amount,
+            );
+            
+                        // Buttons and Meter Row
+                        HStack::new(cx, |cx| {
+                            let params_down = params.clone();
+                            let gui_down = gui.clone();
+                            let params_up = params.clone();
+                            let gui_up = gui.clone();
+                            
+                            // Custom momentary button using Element/HStack to ensure event capture works
+                            HStack::new(cx, |cx| {
+                                Label::new(cx, "Learn")
+                                    .hoverable(false); // Let parent handle events
+                            })
+                            .class("small-button")
+                            .on_mouse_down(move |cx, btn| {
+                                if btn == MouseButton::Left {
+                                    let s = ParamSetter::new(gui_down.as_ref());
+                                    s.begin_set_parameter(&params_down.noise_learn_trigger);
+                                    s.set_parameter(&params_down.noise_learn_trigger, true);
+                                    s.end_set_parameter(&params_down.noise_learn_trigger);
+                                    cx.capture(); // Critical for momentary behavior
+                                }
+                            })
+                            .on_mouse_up(move |cx, btn| {
+                                if btn == MouseButton::Left {
+                                    let s = ParamSetter::new(gui_up.as_ref());
+                                    s.begin_set_parameter(&params_up.noise_learn_trigger);
+                                    s.set_parameter(&params_up.noise_learn_trigger, false);
+                                    s.end_set_parameter(&params_up.noise_learn_trigger);
+                                    cx.release();
+                                }
+                            });
+                            
+                                            let params_clear_down = params.clone();
+                                            let gui_clear_down = gui.clone();
+                                            let params_clear_up = params.clone();
+                                            let gui_clear_up = gui.clone();
+                            
+                                            HStack::new(cx, |cx| {
+                                                Label::new(cx, "Clear").hoverable(false);
+                                            })
+                                            .class("small-button")
+                                            .on_mouse_down(move |cx, btn| {
+                                                if btn == MouseButton::Left {
+                                                    let s = ParamSetter::new(gui_clear_down.as_ref());
+                                                    s.begin_set_parameter(&params_clear_down.noise_learn_clear);
+                                                    s.set_parameter(&params_clear_down.noise_learn_clear, true);
+                                                    s.end_set_parameter(&params_clear_down.noise_learn_clear);
+                                                    cx.capture();
+                                                }
+                                            })
+                                            .on_mouse_up(move |cx, btn| {
+                                                if btn == MouseButton::Left {
+                                                    let s = ParamSetter::new(gui_clear_up.as_ref());
+                                                    s.begin_set_parameter(&params_clear_up.noise_learn_clear);
+                                                    s.set_parameter(&params_clear_up.noise_learn_clear, false);
+                                                    s.end_set_parameter(&params_clear_up.noise_learn_clear);
+                                                    cx.release();
+                                                }
+                                            });                            
+                            // Quality Meter
+                            VStack::new(cx, |cx| {
+                                Label::new(cx, "Profile").class("mini-label");
+                                NoiseLearnQualityMeter::new(cx, meters.clone())
+                                    .height(Pixels(8.0)) // Slightly taller for visibility
+                                    .width(Pixels(40.0));
+                            })
+                            .class("quality-meter-container");
+            
+                        }).class("noise-learn-controls");        }).class("group-container");
+
         create_slider(
             cx,
             "De-Verb",
@@ -1013,14 +1061,6 @@ fn build_clean(
             gui.clone(),
             ParamId::ReverbReduction,
             |p| &p.reverb_reduction,
-        );
-        create_slider(
-            cx,
-            "Clarity",
-            params.clone(),
-            gui.clone(),
-            ParamId::Clarity,
-            |p| &p.clarity,
         );
         create_slider(
             cx,
@@ -1047,6 +1087,14 @@ fn build_polish(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
             gui.clone(),
             ParamId::Proximity,
             |p| &p.proximity,
+        );
+        create_slider(
+            cx,
+            "Clarity",
+            params.clone(),
+            gui.clone(),
+            ParamId::Clarity,
+            |p| &p.clarity,
         );
         create_slider(
             cx,
@@ -1104,6 +1152,7 @@ fn build_header(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
             move |cx, lens| {
                 let m = lens.get(cx);
 
+                // Clone inside Binding so we do not move captured Arcs into nested move closures
                 let params_local = params_for_binding.clone();
                 let gui_local = gui_for_binding.clone();
 
@@ -1200,10 +1249,20 @@ fn build_footer(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
                     s.begin_set_parameter(&params_reset.noise_tone);
                     s.set_parameter(&params_reset.noise_tone, 0.5);
                     s.end_set_parameter(&params_reset.noise_tone);
+                    
+                    // Reset Static Noise Params
+                    s.begin_set_parameter(&params_reset.noise_learn_amount);
+                    s.set_parameter(&params_reset.noise_learn_amount, 0.0);
+                    s.end_set_parameter(&params_reset.noise_learn_amount);
+                    
+                    s.begin_set_parameter(&params_reset.noise_learn_trigger);
+                    s.set_parameter(&params_reset.noise_learn_trigger, false);
+                    s.end_set_parameter(&params_reset.noise_learn_trigger);
+                    
+                    s.begin_set_parameter(&params_reset.noise_learn_clear);
+                    s.set_parameter(&params_reset.noise_learn_clear, false);
+                    s.end_set_parameter(&params_reset.noise_learn_clear);
 
-                    s.begin_set_parameter(&params_reset.noise_mode);
-                    s.set_parameter(&params_reset.noise_mode, crate::presets::NoiseMode::Normal);
-                    s.end_set_parameter(&params_reset.noise_mode);
 
                     s.begin_set_parameter(&params_reset.reverb_reduction);
                     s.set_parameter(&params_reset.reverb_reduction, 0.0);
@@ -1236,10 +1295,6 @@ fn build_footer(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
                     s.begin_set_parameter(&params_reset.use_ml);
                     s.set_parameter(&params_reset.use_ml, true);
                     s.end_set_parameter(&params_reset.use_ml);
-
-                    s.begin_set_parameter(&params_reset.use_dtln);
-                    s.set_parameter(&params_reset.use_dtln, false);
-                    s.end_set_parameter(&params_reset.use_dtln);
 
                     s.begin_set_parameter(&params_reset.macro_mode);
                     s.set_parameter(&params_reset.macro_mode, true);
@@ -1323,9 +1378,9 @@ fn build_footer(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
     .class("footer");
 }
 
-// ============================================================================
+// ============================================================================ 
 // MAIN ENTRY
-// ============================================================================
+// ============================================================================ 
 
 pub fn build_ui(
     cx: &mut Context,

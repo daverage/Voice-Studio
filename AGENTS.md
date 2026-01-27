@@ -38,7 +38,7 @@ cargo fmt
   - "Edit CSS" button to open `src/ui.css` in your system's default text editor
   - "Reload CSS" button to reload styles from disk in real-time
 
-**ML Note**: Neural denoising (DTLN) is mandatory and always compiled in. It uses optimized CPU inference. GPU support has been removed for stability.
+**DSP Note**: All denoising is handled by the deterministic DSP pipeline; there is no neural inference path in this repository.
 
 ## Architecture
 
@@ -48,8 +48,7 @@ cargo fmt
 Input → SpeechHpf → Analysis → EarlyReflection → Denoiser → PlosiveSoftener → BreathReducer → Deverber → Shaping → Dynamics → Output
 ```
 
-**Restoration stage** (`src/dsp/denoiser.rs`, `src/dsp/deverber.rs`, `src/dsp/plosive_softener.rs`, `src/dsp/breath_reducer.rs`):
-- Hybrid Spectral + DTLN denoiser
+- Spectral denoiser with adaptive magnitude gating (pure DSP)
 - Automatic plosive/thump protection
 - Confidence-weighted breath softening
 - Late reverb reduction

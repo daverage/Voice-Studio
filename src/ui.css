@@ -277,88 +277,6 @@
 }
 
 /* ============================================================================
-   TOGGLE (ADVANCED MODE)
-   ============================================================================ */
-
-.toggle-row {
-    height: 30px;
-    margin-bottom: 16px;
-    margin-top: 6px;
-    child-space: 1s;
-}
-
-/* ============================================================================
-   DTLN INDICATOR
-   ============================================================================ */
-
-.dtln-indicator-row {
-    height: 30px;
-    margin-bottom: 16px;
-    margin-top: 6px;
-    child-space: 1s;
-}
-
-.dtln-indicator-label {
-    font-size: 16;
-    color: #94a3b8;
-    right: 12px;
-}
-
-.dtln-status-container {
-    width: auto;
-    height: 24px;
-    padding-left: 12px;
-    padding-right: 12px;
-}
-
-.dtln-active {
-    color: #10b981;
-    font-weight: bold;
-    font-size: 14;
-}
-
-.dtln-inactive {
-    color: #94a3b8;
-    font-size: 14;
-}
-
-.dtln-warning {
-    color: #f59e0b;
-    font-weight: bold;
-    font-size: 14;
-}
-
-.toggle-label {
-    font-size: 16;
-    color: #94a3b8;
-    right: 12px;
-}
-
-.mode-toggle,
-.mode-toggle-active {
-    border-radius: 4px;
-    font-size: 14;
-    height: 26px;
-    width: 90px;
-    padding-left: 12px;
-    padding-right: 12px;
-    child-space: 1s;
-}
-
-.mode-toggle {
-    background-color: #0f172a;
-    border: 1px solid #334155;
-    color: #94a3b8;
-}
-
-.mode-toggle-active {
-    background-color: #f97316;
-    border: 1px solid #fb923c;
-    color: #ffffff;
-    font-weight: bold;
-}
-
-/* ============================================================================
    DROPDOWN (OUTPUT PRESET)
    ============================================================================ */
 
@@ -465,4 +383,55 @@ dropdown.dropdown-box popup {
 .copyright-text {
     font-size: 10;
     color: #64748b;
+}
+
+/* ============================================================================
+   NOISE LEARN CONTROLS
+   ============================================================================ */
+
+.group-container {
+    margin-top: 4px;
+    margin-bottom: 12px;
+}
+
+.noise-learn-controls {
+    height: 32px;
+    col-between: 8px;
+    child-top: 4px;
+}
+
+.small-button {
+    background-color: #1e293b;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+    border-radius: 4px;
+    font-size: 13;
+    height: 24px;
+    padding-left: 8px;
+    padding-right: 8px;
+    child-space: 1s;
+    text-align: center;
+}
+
+.small-button:hover {
+    background-color: #334155;
+    color: #ffffff;
+}
+
+.small-button:active {
+    background-color: #1d4ed8;
+    border-color: #3b82f6;
+}
+
+.quality-meter-container {
+    width: 60px;
+    child-space: 1s;
+}
+
+.mini-label {
+    font-size: 10;
+    color: #64748b;
+    text-transform: uppercase;
+    text-align: center;
+    bottom: 2px;
 }
