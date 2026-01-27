@@ -136,7 +136,16 @@ impl DtlnCore {
         for i in 0..STAGE2_FEATURES {
             self.dense_buf[i] = sigmoid(self.dense_buf[i]) * self.norm_buf[i];
         }
-        run_linear(&self.dense_buf, &self.weights.stage2_conv3_kernel, output)
+        let success = run_linear(&self.dense_buf, &self.weights.stage2_conv3_kernel, output);
+
+        // Critical: Clamp stage 2 output to prevent unbounded amplification
+        // The linear layer can produce arbitrary values - must constrain to safe audio range
+        if success {
+            for sample in output.iter_mut() {
+                *sample = sample.clamp(-1.0, 1.0);
+            }
+        }
+        success
     }
 
 }

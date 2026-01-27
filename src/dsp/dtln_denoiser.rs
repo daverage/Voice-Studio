@@ -24,7 +24,7 @@ use std::sync::Arc;
 const FRAME_SIZE: usize = 512;
 const HOP_SIZE: usize = 128;
 const RINGBUF_MULT: usize = 4;
-const OLA_EPS: f32 = 1e-6;
+const OLA_EPS: f32 = 1e-3;
 const NYQ: usize = FRAME_SIZE / 2;
 const MAG_BINS: usize = NYQ + 1;
 
@@ -201,8 +201,9 @@ impl DtlnDenoiser {
             };
 
             for i in 0..=NYQ {
+                // Mask must not exceed 1.0 - no amplification allowed in spectral domain
                 let gain = if stage1_ready {
-                    self.mask[i].clamp(0.0, 1.2)
+                    self.mask[i].clamp(0.0, 1.0)
                 } else {
                     1.0
                 };
@@ -236,7 +237,9 @@ impl DtlnDenoiser {
             };
 
             for i in 0..FRAME_SIZE {
-                let s = stage_output[i] * self.window[i];
+                // IMPORTANT: do NOT apply window again here.
+                // Windowing is already handled at analysis + synthesis stages.
+                let s = stage_output[i];
                 self.overlap[i] += s;
                 self.ola_norm[i] += self.window[i] * self.window[i];
             }

@@ -305,15 +305,27 @@ mod tests {
             noise_floor_db: -60.0,
         };
 
-        // Process very quiet signal
+        // RMS must be:
+        // 1. Above SILENCE_EXPAND_RMS (0.0012) to not early-return
+        // 2. Below threshold_db (-54 dB = -60 + 6) to trigger expansion
+        // 0.0015 ≈ -56.5 dB, which satisfies both conditions
+        let quiet_env = VoiceEnvelope {
+            fast: 0.0015,
+            slow: 0.0015,
+            rms: 0.0015,
+            confidence: 0.0,
+            noise_floor: 1e-4,
+        };
+
+        // Process very quiet signal with proper envelope
         for _ in 0..10000 {
             expander.process(
                 0.0001,
                 0.0001,
                 1.0,
                 &sidechain,
-                &VoiceEnvelope::default(),
-                &VoiceEnvelope::default(),
+                &quiet_env,
+                &quiet_env,
             );
         }
 

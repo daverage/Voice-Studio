@@ -248,8 +248,10 @@ mod tests {
         // Fast should react more than slow
         assert!(env_impulse.fast > env_impulse.slow);
 
-        // 3. Steady State
-        for _ in 0..1000 {
+        // 3. Steady State - need enough samples for slow envelope to converge
+        // Slow release is 300ms, so we need at least 3x that (~43200 samples at 48kHz)
+        // to allow full convergence from the impulse of 1.0 down to 0.5
+        for _ in 0..50000 {
             tracker.process_sample(0.5);
         }
         let env_steady = tracker.process_sample(0.5);
