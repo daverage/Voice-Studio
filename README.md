@@ -73,3 +73,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Built with the [nih-plug](https://github.com/robbert-vdh/nih-plug) framework.
 - Neural inference powered by [tract](https://github.com/snipsco/tract).
 - UI built with [vizia](https://github.com/vizia/vizia).
+
+
+## Setting Up Agents for MCP Usage
+
+When using tinyMem as an MCP server for AI agents, ensure that your agents follow the MANDATORY TINYMEM CONTROL PROTOCOL.
+
+Include the contract content from [AGENT_CONTRACT.md](AGENT_CONTRACT.md) in your agent's system prompt to ensure proper interaction with tinyMem.
+

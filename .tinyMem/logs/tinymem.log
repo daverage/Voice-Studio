@@ -6,3 +6,7 @@
 {"level":"info","ts":1769469299.4646358,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
 {"level":"info","ts":1769507264.603961,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
 {"level":"info","ts":1769507464.5697038,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"error","ts":1769509200.9004319,"caller":"tinymem/main.go:517","msg":"Root command execution failed","error":"unknown command \"memory_addContract\" for \"tinymem\"","stacktrace":"main.main\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/cmd/tinymem/main.go:517\nruntime.main\n\t/opt/homebrew/Cellar/go/1.25.6/libexec/src/runtime/proc.go:285"}
+{"level":"info","ts":1769509213.586727,"caller":"app/app.go:94","msg":"Database connection closed."}
+{"level":"info","ts":1769509297.066137,"caller":"app/app.go:94","msg":"Database connection closed."}
+{"level":"info","ts":1769509601.543474,"caller":"app/app.go:94","msg":"Database connection closed."}

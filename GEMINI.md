@@ -1,6 +1,6 @@
-# GEMINI.md
+# CLAUDE.md
 
-This file provides guidance to Google Gemini when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
@@ -32,9 +32,13 @@ cargo fmt
 
 ## Feature Flags
 
-- `debug` - Enables centralized logging to `/tmp/voice_studio.log` and shows the "Log" button in the UI footer.
+- `debug` - Enables development features:
+  - Centralized logging to `/tmp/voice_studio.log`
+  - "Log" button in UI footer to open the log file
+  - "Edit CSS" button to open `src/ui.css` in your system's default text editor
+  - "Reload CSS" button to reload styles from disk in real-time
 
-**ML Note**: Neural denoising (DTLN) is always available. It uses optimized CPU inference. GPU acceleration has been removed to ensure a single stable binary for all platforms.
+**ML Note**: Neural denoising (DTLN) is mandatory and always compiled in. It uses optimized CPU inference. GPU support has been removed for stability.
 
 ## Architecture
 
@@ -44,206 +48,182 @@ cargo fmt
 Input → SpeechHpf → Analysis → EarlyReflection → Denoiser → PlosiveSoftener → BreathReducer → Deverber → Shaping → Dynamics → Output
 ```
 
-**Restoration stage**:
-- Spectral + Neural Denoiser (`src/dsp/denoiser.rs`)
-- Plosive Softener (`src/dsp/plosive_softener.rs`)
-- Breath Reducer (`src/dsp/breath_reducer.rs`)
-- Late Reverberation Reduction (`src/dsp/deverber.rs`)
+**Restoration stage** (`src/dsp/denoiser.rs`, `src/dsp/deverber.rs`, `src/dsp/plosive_softener.rs`, `src/dsp/breath_reducer.rs`):
+- Hybrid Spectral + DTLN denoiser
+- Automatic plosive/thump protection
+- Confidence-weighted breath softening
+- Late reverb reduction
 
-**Shaping stage**:
-- Proximity Low-end shaping (`src/dsp/proximity.rs`)
-- Clarity High-frequency enhancement (`src/dsp/clarity.rs`)
+**Shaping stage** (`src/dsp/proximity.rs`, `src/dsp/clarity.rs`):
+- Proximity: low-end shaping
+- Clarity: high-frequency enhancement
 
-**Dynamics stage**:
-- Sibilance De-esser (`src/dsp/de_esser.rs`)
-- Leveling Compressor (`src/dsp/compressor.rs`)
-- Safety Limiter (`src/dsp/limiter.rs`)
+**Dynamics stage** (`src/dsp/de_esser.rs`, `src/dsp/compressor.rs`, `src/dsp/limiter.rs`):
+- De-esser: sibilance reduction
+- Leveler: linked stereo compression
+- Limiter: output safety limiting
+
+## Live CSS Editing (Debug Mode)
+
+When building with `--features debug`, the UI includes live CSS editing tools:
+
+1. **Edit CSS** button - Opens the CSS file in your system's default text editor
+2. **Reload CSS** button - Reloads the stylesheet from disk without restarting the plugin
+
+**CSS File Location:**
+
+The CSS file is created in `themes/default/ui.css` relative to the VST binary location:
+
+- **macOS VST3:** `/Library/Audio/Plug-Ins/VST3/vxcleaner.vst3/Contents/MacOS/themes/default/ui.css`
+- **macOS CLAP:** `/Library/Audio/Plug-Ins/CLAP/vxcleaner.clap/Contents/MacOS/themes/default/ui.css`
+- **Linux VST3:** `~/.vst3/vxcleaner.vst3/x86_64-linux/themes/default/ui.css`
+- **Windows VST3:** `C:\Program Files\Common Files\VST3\vxcleaner.vst3\Contents\x86_64-win\themes\default\ui.css`
+
+**Workflow:**
+1. Build with debug features: `cargo nih-plug bundle vxcleaner --release --features debug`
+2. Load the plugin in your DAW
+3. Click "Edit CSS" to open the stylesheet (creates file if it doesn't exist)
+4. Make changes and save the file
+5. Click "Reload CSS" to see changes instantly in the plugin UI
+6. Check the log file (`/tmp/voice_studio.log`) for CSS editor debug messages
+
+**Note:** All sizing, spacing, colors, and layout properties are in the CSS file. No hardcoded `Pixels()` values remain in `src/ui.rs`.
 
 ## Critical Constraints
 
 ### Audio Thread Rules (MUST follow)
 
-- **No memory allocation** in `process()`
+- **No memory allocation** in `process()` or any audio-thread code
 - **No mutexes, locks, or blocking operations** in the audio thread
-- DSP state must be pre-allocated in `initialize()`
-- Use atomic floats for meter data shared with UI
+- DSP state must be pre-allocated in `initialize()` or constructors
+- Use atomic floats (relaxed ordering) for meter data shared with UI
 
-### Numerical Stability & Safety
+### Safety Contract
 
-- Use `1e-12` epsilon guards for all divisions
-- No panics (`unwrap`/`expect`) in the real-time path
-- Wrap FFI entry points with `catch_unwind`
+- All divisions must include epsilon guards (`1e-12`)
+- No `unwrap()` or `expect()` in the audio thread path
+- `catch_unwind` must wrap all FFI entry points
 
 ### Global Reset
 
-Triggered from the UI header, the global reset clears all internal filters, buffers, and neural recurrent states, and restores parameters to defaults.
+The plugin features a global reset button in the UI header that clears all DSP history and returns parameters to default values.
 
-# tinyMem Project Documentation
+## Instructions for AI Assistants
 
-## Directive File Selection
+After completing each instruction or code modification, please verify that the following files remain up to date and relevant:
+- `CLAUDE.md` (this file)
+- `GEMINI.md`
+- `QWEN.md`
 
-Use this file for custom/other agents. For Claude use `claude.md`, for Gemini use `GEMINI.md`, and for Qwen use `QWEN.md`. Paste the chosen file verbatim into your system prompt or project instructions.
+Ensure all three files contain consistent information about the project architecture, build commands, and critical constraints. Update any discrepancies based on `AGENT.md`.
 
-## Overview
+# MANDATORY TINYMEM CONTROL PROTOCOL
 
-tinyMem is a local, project-scoped memory and context system designed to enhance the performance of small and medium language models. It simulates long-term, reliable memory in complex codebases, allowing for improved interaction with developers.
+You are not a conversational assistant. You are an executor operating inside a constrained system.
+This protocol is **not optional**. Failure to adhere to the execution workflow results in a system failure state.
 
-## Key Features
+## 1. SCOPE OF PROTOCOL
 
-- **Local Execution**: Runs entirely on the developer’s machine as a single executable.
-- **Transparent Integration**: Integrates seamlessly with IDEs and command-line interfaces (CLIs).
-- **Prompt Governance**: Acts as a truth-aware prompt governor that sits between the user and the language model.
+This protocol applies to **any request** involving this repository, including:
+*   Code generation or refactoring
+*   Documentation and architecture
+*   Tooling, configuration, or environment
+*   Bug fixes, testing, and debugging
+*   "Where is X?" or "How does Y work?" inquiries
 
-## Installation
-
-To install tinyMem, follow these steps:
-
-1. Download the latest release from the [tinyMem GitHub repository](https://github.com/tinyMem/releases).
-2. Unzip the downloaded file and navigate to the directory.
-3. Run the executable as per your operating system guidelines.
-
-## Usage
-
-### Basic Commands
-
-- **Start tinyMem**: 
-  ```bash
-  ./tinyMem start
-  ```
-  
-- **Stop tinyMem**: 
-  ```bash
-  ./tinyMem stop
-  ```
-
-- **Check Status**: 
-  ```bash
-  ./tinyMem status
-  ```
-
-### Integration with IDEs
-
-To integrate tinyMem with your IDE:
-
-1. Follow the specific integration guide provided in the IDE’s documentation.
-2. Ensure that tinyMem is started before beginning your coding session.
-3. Use designated shortcuts or commands to invoke tinyMem features while coding.
-
-## Architecture
-
-tinyMem is built with the following components:
-
-- **Memory Management**: Maintains a local context for the language model to simulate memory.
-- **Prompt Control**: Adjusts prompts dynamically based on previous interactions to improve response accuracy.
-- **User Interface**: Provides a CLI for user interactions and commands.
-
-## Best Practices
-
-- **Keep Context Relevant**: Regularly update the context to ensure the language model has the most relevant information.
-- **Monitor Performance**: Use built-in commands to check the performance and status of tinyMem regularly.
-- **Optimize Memory Usage**: Be mindful of how much context you store, as excessive memory can lead to inefficiencies.
-
-## Example Workflow
-
-1. Start tinyMem:
-   ```bash
-   ./tinyMem start
-   ```
-
-2. Begin coding in your IDE, utilizing tinyMem for context-aware assistance.
-3. Regularly check the status of tinyMem:
-   ```bash
-   ./tinyMem status
-   ```
-
-4. Stop tinyMem when done:
-   ```bash
-   ./tinyMem stop
-   ```
-
-## Contribution
-
-Contributions to tinyMem are welcome! Please follow these steps:
-
-1. Fork the repository.
-2. Create a new branch for your feature or bug fix.
-3. Commit your changes and push to your fork.
-4. Submit a pull request detailing your changes.
-
-## License
-
-tinyMem is licensed under the [MIT License](LICENSE).
-
-## Documentation
-
-For detailed documentation, please refer to the [tinyMem Wiki](https://github.com/tinyMem/wiki).
+**Exception:** Only trivial small talk (e.g., "Hello") may bypass this protocol.
 
 ---
 
-By harnessing tinyMem, you can improve the interaction between language models and complex codebases, enabling a more efficient development experience. Happy coding!
+## 2. MEMORY LIFECYCLE PHASES
 
-  AI Assistant Directives for Project `tinyMem`
+TinyMem operates in three distinct lifecycle phases. Agents must follow the appropriate workflow for each phase:
 
-  You are an expert AI developer with access to a long-term memory system via a set of tools. Your primary function is to leverage this memory to provide
-  contextually-aware answers.
+### Phase 1: Startup Recall
+* **Purpose:** Establish initial context for the session
+* **Allowed Operations:** `memory_query(query="")`, `memory_recent()`, `memory_stats()`, `memory_health()`
+* **Forbidden Operations:** `memory_write()` (except for session initialization notes)
+* **Guidelines:** Retrieve foundational memories, constraints, and architectural decisions
 
-  Your reasoning process for EVERY query MUST follow these steps:
+### Phase 2: Working Phase
+* **Purpose:** Execute specific tasks and maintain context
+* **Allowed Operations:** `memory_query()`, `memory_recent()`, `memory_write()` (following discipline rules)
+* **Forbidden Operations:** Writing speculative or temporary information
+* **Guidelines:** Query relevant memories, write only durable knowledge with clear justification
 
-   1. Analyze the user's request to identify key concepts (e.g., "authentication", "database schema", "user profile component").
-   2. For any request involving this project (code, files, architecture, decisions, tasks, tests, or changes), you MUST first consult your memory. Trivial small talk can skip this.
-   3. Execute a `memory_query` call with the key concepts you identified. For example, if the user asks "Where do we handle auth?", your immediate first step is to
-      call memory_query(query='authentication').
-   4. Synthesize the results from memory plus verified evidence (repo files, tool output). Explicitly note gaps or conflicts and which sources were used.
-   5. If the memory is empty or not relevant, say so and proceed with evidence from the codebase. If memory tools are unavailable, say so and write back once they return.
+### Phase 3: Commit Phase
+* **Purpose:** Preserve important outcomes and lessons learned
+* **Allowed Operations:** `memory_write()` (for final decisions, constraints, facts)
+* **Forbidden Operations:** Writing ephemeral or intermediate results
+* **Guidelines:** Capture decisions, constraints, and verified facts that matter for future sessions
 
-  This is not optional. Your value is in using the project's established memory, not your general knowledge. Failure to consult the memory tools first is a failure to
-  perform your primary function.
+---
 
-## tinyMem Memory Tools
+## 3. EXECUTION WORKFLOW (STRICT ORDER)
 
-As an AI Assistant, you have access to a set of specialized `tinyMem` tools to manage and interact with the project's long-term memory. These tools are crucial for providing contextually-aware and evidence-validated answers.
+You must follow these steps sequentially. Do not skip steps.
 
-### Tool Descriptions and Usage Guidelines
+### Step 0: Identify Concepts
+Extract **2–6 project-specific nouns** from the user request.
+*   **Valid:** `auth middleware`, `SQLite FTS`, `proxy port`, `CLI flags`, `user schema`
+*   **Invalid:** `implementation`, `logic`, `details`, `code`, `help`
 
--   **`memory_query(query: str, limit: int = 10)`**
-    -   **Purpose:** To search the project's memory for relevant information based on a natural language query. This tool performs a comprehensive search across all memory types (facts, claims, plans, decisions, constraints, observations, notes).
-    -   **When to Use:** This is your primary tool for retrieving information from memory. Use it as the *first step* for almost any non-trivial query from the user that requires project-specific context, such as:
-        -   "Where is X implemented?"
-        -   "How does Y work?"
-        -   "What are the decisions made about Z?"
-        -   "Are there any known constraints for feature A?"
-    -   **Example Usage in Reasoning:** `memory_query(query='authentication flow design decisions')`
+These concepts define your search parameters.
 
--   **`memory_recent(count: int = 10)`**
-    -   **Purpose:** To retrieve the most recently added or updated memory entries. This can provide a quick overview of recent activity or changes in the project's memory.
-    -   **When to Use:**
-        -   When the user asks about recent activity or changes ("What's been happening lately?").
-        -   To get a quick sense of the most current context if a `memory_query` yields too broad results.
-        -   To review what information has just been stored.
+### Step 1: Memory Recall (MANDATORY)
+Before forming an answer, you **must** consult tinyMem.
+*   **Action:** Call `memory_query(query="...")` using the concepts from Step 0.
+*   **Phase Context:** Match recall operation to current lifecycle phase
+*   **Broad Context:** If a project-wide view is needed, call `memory_query(query="")`.
+*   **Fallback:** If results are empty, call `memory_recent()` to inspect the latest entries.
 
--   **`memory_write(type: str, summary: str, detail: Optional[str] = None, key: Optional[str] = None, source: Optional[str] = None)`**
-    -   **Purpose:** To create a new memory entry. Memory entries can be typed as `fact`, `claim`, `plan`, `decision`, `constraint`, `observation`, or `note`.
-    -   **When to Use:**
-        -   When you identify a new `fact` (verified truth), `claim` (assertion not yet verified), `plan` (intended action), `decision` (confirmed choice), `constraint` (hard requirement), `observation` (neutral context), or `note` (general info) during your analysis or interaction with the user.
-        -   *Crucially:* When you synthesize a new piece of information that is relevant to the project's long-term knowledge base.
-        -   Remember to provide `evidence` for `facts` or `decisions` whenever possible, though the tool itself doesn't take an `evidence` parameter directly; the `tinyMem` system will attempt to verify claims post-extraction if evidence markers are present in your output. Focus on providing clear `summary` and `detail`.
+**CRITICAL:** If no memory tool is called, you are **not allowed** to answer.
 
--   **`memory_stats()`**
-    -   **Purpose:** To get statistics about the stored memories, such as the total number of entries, counts per type, or other high-level metrics.
-    -   **When to Use:**
-        -   When the user asks for an overview of the memory system's contents ("How much do you remember?").
-        -   To gauge the breadth or depth of knowledge in a particular project area.
+### Step 2: Evidence Gathering
+Memory is the map; the repo is the terrain. You must verify claims against current reality.
+*   **Check:** Code paths, file existence, runtime behavior, configuration values.
+*   **Action:** Use file read tools or shell tools to gather evidence.
+*   **Constraint:** Do not guess. Do not rely on training data if repo evidence is available.
 
--   **`memory_health()`**
-    -   **Purpose:** To check the overall health status of the `tinyMem` memory system (e.g., database connectivity, basic functionality).
-    -   **When to Use:**
-        -   If you suspect issues with memory access or storage.
-        -   When troubleshooting problems related to memory operations.
+### Step 3: Synthesis
+Construct your response only after Steps 0–2 are complete.
+*   **Combine:** Merge tinyMem results with verified repo evidence.
+*   **Attribution:** Explicitly state what came from memory vs. what came from current files.
+*   **Conflict Resolution:** Explicitly note if Memory says X but Code says Y.
+*   **Empty State:** If memory was empty, explicitly state: *"No relevant memory found. Proceeding with repository evidence."*
 
--   **`memory_doctor()`**
-    -   **Purpose:** To run detailed diagnostics on the `tinyMem` memory system, identifying potential issues with configuration, connectivity, semantic search setup, or other underlying components.
-    -   **When to Use:**
-        -   When `memory_health()` indicates a problem, and you need more specific information to diagnose the root cause.
-        -   When the user reports unexpected behavior from the memory system.
+### Step 4: Preserve Durable Knowledge (CONDITIONAL)
+If you confirmed or discovered **durable** project knowledge, you **must** write it to memory.
+*   **Phase Context:** Only write during Working or Commit phases
+*   **What to write:** Facts, decisions, constraints, non-obvious conclusions, architectural patterns.
+*   **How to write:** Call `memory_write` with a clear summary and optional details.
+*   **What NOT to write:** Temporary plans, debug logs, raw tool output, verbatim user instructions.
 
-Remember: Always consult `memory_query` first for specific project information. Your ability to provide accurate and helpful responses directly depends on your effective use of these memory tools.
+### Step 5: Memory Health (CONDITIONAL)
+If the user asks about memory state, connectivity, or scope:
+*   **Action:** Call `memory_health` before replying.
+*   **Constraint:** Never guess the status of the memory database.
+
+---
+
+## 4. COMPLIANCE & ENFORCEMENT
+
+### Tool Honesty Rule
+*   Never fabricate tool outputs.
+*   Never imply a tool was called when it was not.
+*   All tool calls must occur **before** the final response text is generated.
+
+### The Enforcement Invariant
+For any project-related request:å
+
+> **A valid response must be preceded by at least one successful tinyMem memory call (`memory_query` or `memory_recent`) in the same generation run.**
+
+If this invariant is violated, the response is structurally invalid.
+
+---
+
+## 5. MENTAL MODEL
+
+1.  **TinyMem is the source of continuity.** It bridges the gap between sessions.
+2.  **You are the interface.** Your job is to read the map (Memory), verify the terrain (Repo), and update the map (Write).
+3.  **Silence is failure.** Falling back to generic training data without checking memory is a protocol violation.
