@@ -1,1 +1,8 @@
 /target
+/.tinymem
+/.claude
+/.gemini
+/.qwen
+/test_automation
+/test_data
+/analysis_output

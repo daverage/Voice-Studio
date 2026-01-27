@@ -432,7 +432,7 @@ mod tests {
 
         let input_l = 0.5;
         let input_r = 0.3;
-        let (out_l, out_r) = guardrails.process(input_l, input_r, false);
+        let (out_l, out_r) = guardrails.process(input_l, input_r, false, 0.5);
 
         assert!((out_l - input_l).abs() < 1e-6);
         assert!((out_r - input_r).abs() < 1e-6);
@@ -445,7 +445,7 @@ mod tests {
         // Process a balanced signal (speech-like 1kHz)
         for i in 0..10000 {
             let sample = 0.3 * (i as f32 * 0.1308).sin(); // ~1kHz at 48kHz
-            guardrails.process(sample, sample, true);
+            guardrails.process(sample, sample, true, 0.5);
         }
 
         // Should have minimal correction for speech-band signal

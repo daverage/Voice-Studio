@@ -94,6 +94,14 @@ pub struct Meters {
     pub(crate) params_hash_after: AtomicU64,
     pub(crate) audible_change_detected: AtomicI32,
     pub(crate) pre_switch_audible_rms: AtomicF32,
+
+    // DTLN availability status
+    pub(crate) dtln_available: AtomicI32,
+
+    // Pump detection meters
+    pub(crate) pump_event_count: AtomicI32,
+    pub(crate) pump_severity_db: AtomicF32,
+    pub(crate) compressor_gain_delta_db: AtomicF32,
 }
 
 impl Meters {
@@ -235,6 +243,37 @@ impl Meters {
         f32::from_bits(self.debug_expander_atten_db.load(Ordering::Relaxed))
     }
 
+    // =========================================================================
+    // Pump Detection Meters
+    // =========================================================================
+
+    pub fn increment_pump_event(&self) {
+        self.pump_event_count.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[allow(dead_code)]
+    pub fn get_pump_event_count(&self) -> i32 {
+        self.pump_event_count.load(Ordering::Relaxed)
+    }
+
+    pub fn set_pump_severity_db(&self, val: f32) {
+        self.pump_severity_db.store(val, Ordering::Relaxed);
+    }
+
+    #[allow(dead_code)]
+    pub fn get_pump_severity_db(&self) -> f32 {
+        self.pump_severity_db.load(Ordering::Relaxed)
+    }
+
+    pub fn set_compressor_gain_delta_db(&self, val: f32) {
+        self.compressor_gain_delta_db.store(val, Ordering::Relaxed);
+    }
+
+    #[allow(dead_code)]
+    pub fn get_compressor_gain_delta_db(&self) -> f32 {
+        self.compressor_gain_delta_db.load(Ordering::Relaxed)
+    }
+
     pub fn reset(&self) {
         self.input_peak_l.store(0.0f32.to_bits(), Ordering::Relaxed);
         self.input_peak_r.store(0.0f32.to_bits(), Ordering::Relaxed);
@@ -292,5 +331,14 @@ impl Meters {
         self.params_hash_after.store(0, Ordering::Relaxed);
         self.audible_change_detected.store(0, Ordering::Relaxed);
         self.pre_switch_audible_rms.store(-80.0, Ordering::Relaxed);
+    }
+
+    pub fn set_dtln_available(&self, available: bool) {
+        self.dtln_available
+            .store(if available { 1 } else { 0 }, Ordering::Relaxed);
+    }
+
+    pub fn is_dtln_available(&self) -> bool {
+        self.dtln_available.load(Ordering::Relaxed) != 0
     }
 }

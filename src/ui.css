@@ -287,6 +287,47 @@
     child-space: 1s;
 }
 
+/* ============================================================================
+   DTLN INDICATOR
+   ============================================================================ */
+
+.dtln-indicator-row {
+    height: 30px;
+    margin-bottom: 16px;
+    margin-top: 6px;
+    child-space: 1s;
+}
+
+.dtln-indicator-label {
+    font-size: 16;
+    color: #94a3b8;
+    right: 12px;
+}
+
+.dtln-status-container {
+    width: auto;
+    height: 24px;
+    padding-left: 12px;
+    padding-right: 12px;
+}
+
+.dtln-active {
+    color: #10b981;
+    font-weight: bold;
+    font-size: 14;
+}
+
+.dtln-inactive {
+    color: #94a3b8;
+    font-size: 14;
+}
+
+.dtln-warning {
+    color: #f59e0b;
+    font-weight: bold;
+    font-size: 14;
+}
+
 .toggle-label {
     font-size: 16;
     color: #94a3b8;

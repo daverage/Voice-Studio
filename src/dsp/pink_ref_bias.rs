@@ -60,6 +60,7 @@ pub struct PinkRefBias {
     input_buffer: Vec<f32>,
     window: Vec<f32>,
     fft_scratch: Vec<Complex<f32>>,
+    fft_scratch_buf: Vec<Complex<f32>>,
     write_pos: usize,
 
     // Analysis State
@@ -67,8 +68,10 @@ pub struct PinkRefBias {
     gate_smooth: f32, // Smoothed speech gate [0..1]
 
     // Filter State
-    low_shelf: Biquad,
-    high_shelf: Biquad,
+    low_shelf_l: Biquad,
+    low_shelf_r: Biquad,
+    high_shelf_l: Biquad,
+    high_shelf_r: Biquad,
 
     // Gain Smoothing
     target_lo_db: f32,
@@ -86,6 +89,9 @@ pub struct PinkRefBias {
     // Bypass Logic
     consecutive_low_gate_frames: usize,
     is_frozen: bool,
+
+    // Coefficient update counter
+    coeff_update_counter: u32,
 }
 
 impl PinkRefBias {
@@ -94,17 +100,25 @@ impl PinkRefBias {
         let frame_size = if sample_rate > 50000.0 { 2048 } else { 1024 };
         let fft = planner.plan_fft_forward(frame_size);
 
+        let scratch_len = fft.get_inplace_scratch_len();
+        let fft_scratch_buf = vec![Complex::default(); scratch_len];
+
         let window: Vec<f32> = (0..frame_size)
             .map(|i| {
-                0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / frame_size as f32).cos())
+                let denom = (frame_size - 1) as f32;
+                0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / denom).cos())
             })
             .collect();
 
-        let mut low_shelf = Biquad::new();
-        low_shelf.update_low_shelf(SHELF_LO_FREQ, SHELF_Q, 0.0, sample_rate);
+        let mut low_shelf_l = Biquad::new();
+        let mut low_shelf_r = Biquad::new();
+        low_shelf_l.update_low_shelf(SHELF_LO_FREQ, SHELF_Q, 0.0, sample_rate);
+        low_shelf_r.update_low_shelf(SHELF_LO_FREQ, SHELF_Q, 0.0, sample_rate);
 
-        let mut high_shelf = Biquad::new();
-        high_shelf.update_high_shelf(SHELF_HI_FREQ, SHELF_Q, 0.0, sample_rate);
+        let mut high_shelf_l = Biquad::new();
+        let mut high_shelf_r = Biquad::new();
+        high_shelf_l.update_high_shelf(SHELF_HI_FREQ, SHELF_Q, 0.0, sample_rate);
+        high_shelf_r.update_high_shelf(SHELF_HI_FREQ, SHELF_Q, 0.0, sample_rate);
 
         // Calculate smoothing coefficients
         // Note: For frame-rate smoothing (tilt), we adjust tau based on hop time
@@ -129,13 +143,16 @@ impl PinkRefBias {
             input_buffer: vec![0.0; frame_size],
             window,
             fft_scratch: vec![Complex::default(); frame_size],
+            fft_scratch_buf,
             write_pos: 0,
 
             tilt_est: TARGET_TILT_DB_PER_OCT, // Start neutral
             gate_smooth: 0.0,
 
-            low_shelf,
-            high_shelf,
+            low_shelf_l,
+            low_shelf_r,
+            high_shelf_l,
+            high_shelf_r,
 
             target_lo_db: 0.0,
             target_hi_db: 0.0,
@@ -150,6 +167,7 @@ impl PinkRefBias {
 
             consecutive_low_gate_frames: 0,
             is_frozen: true, // Start frozen at 0
+            coeff_update_counter: 0,
         }
     }
 
@@ -189,13 +207,16 @@ impl PinkRefBias {
         // Note: Filter coefficients are updated in update_gains only when changed significantly
         // or we can update them every sample. Updating Biquad coeffs is cheap enough.
 
-        // Apply Low Shelf
-        let l_lo = self.low_shelf.process(l);
-        let r_lo = self.low_shelf.process(r);
+        // Increment coefficient update counter
+        self.coeff_update_counter = self.coeff_update_counter.wrapping_add(1);
 
-        // Apply High Shelf
-        let l_out = self.high_shelf.process(l_lo);
-        let r_out = self.high_shelf.process(r_lo);
+        // Apply Low Shelf (separate filters per channel to avoid channel coupling)
+        let l_lo = self.low_shelf_l.process(l);
+        let r_lo = self.low_shelf_r.process(r);
+
+        // Apply High Shelf (separate filters per channel to avoid channel coupling)
+        let l_out = self.high_shelf_l.process(l_lo);
+        let r_out = self.high_shelf_r.process(r_lo);
 
         (l_out, r_out)
     }
@@ -210,7 +231,8 @@ impl PinkRefBias {
         }
 
         // 2. Perform FFT
-        self.fft.process(&mut self.fft_scratch);
+        self.fft
+            .process_with_scratch(&mut self.fft_scratch, &mut self.fft_scratch_buf);
 
         // 3. Compute Power Spectrum & Tilt
         // Regress S[k] vs log2(f_k)
@@ -353,13 +375,14 @@ impl PinkRefBias {
 
         // "If proximity slider is high... reduce G_max by 25%"
         // We'll scale down low boost if proximity is high
-        if proximity_amt > 0.5 && safe_target_lo > 0.0 {
-            safe_target_lo *= 0.75;
+        if proximity_amt > 0.5 {
+            safe_target_lo *= 0.75; // ok to keep as-is if you only want to avoid extra warmth
         }
 
         // "If de-esser is engaged strongly... reduce high shelf gain by 30-50%"
-        if deess_amt > 0.5 && safe_target_hi > 0.0 {
-            safe_target_hi *= 0.6;
+        // Applies to both + and - to prevent additive harshness
+        if deess_amt > 0.5 {
+            safe_target_hi *= 0.7; // applies to both + and -
         }
 
         // Smooth current gains towards targets
@@ -391,15 +414,29 @@ impl PinkRefBias {
         // but maybe update coefficients every 32 samples?
         // Let's do every 32 samples.
 
-        // (Hack: using write_pos as counter, though it resets. It is fine.)
-        if self.write_pos % 32 == 0 {
-            self.low_shelf.update_low_shelf(
+        // Use dedicated counter instead of write_pos which resets
+        if (self.coeff_update_counter & 31) == 0 {
+            // every 32 samples
+            self.low_shelf_l.update_low_shelf(
                 SHELF_LO_FREQ,
                 SHELF_Q,
                 self.current_lo_db,
                 self.sample_rate,
             );
-            self.high_shelf.update_high_shelf(
+            self.low_shelf_r.update_low_shelf(
+                SHELF_LO_FREQ,
+                SHELF_Q,
+                self.current_lo_db,
+                self.sample_rate,
+            );
+
+            self.high_shelf_l.update_high_shelf(
+                SHELF_HI_FREQ,
+                SHELF_Q,
+                self.current_hi_db,
+                self.sample_rate,
+            );
+            self.high_shelf_r.update_high_shelf(
                 SHELF_HI_FREQ,
                 SHELF_Q,
                 self.current_hi_db,
@@ -413,13 +450,16 @@ impl PinkRefBias {
         self.write_pos = 0;
         self.tilt_est = TARGET_TILT_DB_PER_OCT;
         self.gate_smooth = 0.0;
-        self.low_shelf.reset();
-        self.high_shelf.reset();
+        self.low_shelf_l.reset();
+        self.low_shelf_r.reset();
+        self.high_shelf_l.reset();
+        self.high_shelf_r.reset();
         self.target_lo_db = 0.0;
         self.target_hi_db = 0.0;
         self.current_lo_db = 0.0;
         self.current_hi_db = 0.0;
         self.consecutive_low_gate_frames = 0;
         self.is_frozen = true;
+        self.coeff_update_counter = 0;
     }
 }

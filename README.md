@@ -38,6 +38,15 @@ Voice Studio uses a hybrid approach, combining traditional high-precision DSP wi
 - Rust 1.70+
 - `cargo-nih-plug` (install with `cargo install cargo-nih-plug`)
 
+### macOS TensorFlow Lite setup
+The crate now links against a prebuilt TensorFlow Lite library, so builds skip `bindgen` and the makefile entirely. Before running `cargo` you must point the build script at a native `.a` (or `.dylib`) by exporting:
+
+```
+export TFLITE_LIB_DIR=/path/to/libtensorflow-lite.a
+```
+
+If you have an architecture-specific build (e.g., `aarch64-apple-darwin`), you can also set `TFLITE_AARCH64_APPLE_DARWIN_LIB_DIR`. After that any of the normal commands will link that binary instead of rebuilding TFLite.
+
 ### Commands
 
 ```bash

@@ -5,7 +5,7 @@ edition = "2021"
 authors = ["Andrzej Marczewski"]
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "lib"]
 
 [dependencies]
 ebur128 = "0.1"
@@ -13,9 +13,15 @@ ebur128 = "0.1"
 nih_plug = { git = "https://github.com/robbert-vdh/nih-plug.git", features = ["assert_process_allocs"] }
 nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 
+assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid" }
+
 # Tract ML inference
-tract-core   = "=0.21.13"
-tract-tflite = "=0.21.13"
+anyhow = "1.0"
+
+# Lightweight TensorFlow Lite interpreter
+# Note: Use `build` feature to compile TFLite from source (requires TFLITE_RS_MAKE_TARGET=osx on macOS)
+# After first successful build, switch back to default-features = false and set TFLITE_LIB_DIR
+tflite = { version = "0.9.8", default-features = false, features = ["build"], optional = true }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -29,8 +35,18 @@ rustfft = "6.1"
 # locking to 0.2.8 is crucial for the ringbuf syntax used
 ringbuf = "0.2.8"
 once_cell = "1.18"
+hound = "3.4"
 
 [features]
 default = []
+debug = ["assert_process_allocs"]
+assert_process_allocs = []
+tflite_validate = ["tflite"]
 
-debug = []
+[[bin]]
+name = "dtln_validate"
+path = "tools/dtln/validate.rs"
+required-features = ["tflite_validate"]
+
+[patch.crates-io]
+tflite = { path = "vendor/tflite-0.9.8" }

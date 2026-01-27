@@ -1,0 +1,207 @@
+{
+  "version": 1,
+  "dtype": "f32",
+  "tensor_count": 20,
+  "tensors": [
+    {
+      "name": "lstm_4_W",
+      "shape": [
+        1,
+        512,
+        257
+      ],
+      "stage": "stage1",
+      "len": 131584,
+      "checksum": "400081e7df1c5a0821c40feacef5ba16b29344e174dee037b74016345318c42c"
+    },
+    {
+      "name": "lstm_4_R",
+      "shape": [
+        1,
+        512,
+        128
+      ],
+      "stage": "stage1",
+      "len": 65536,
+      "checksum": "15aef6ab8c2c202a0eb6fdddee3cea592049ca323715af6da9b2c2e360bd25fe"
+    },
+    {
+      "name": "lstm_4_B",
+      "shape": [
+        1,
+        1024
+      ],
+      "stage": "stage1",
+      "len": 1024,
+      "checksum": "80b463d66f0417882dd373baac5440466ef0aaace6efbd7162568e1ab41ec686"
+    },
+    {
+      "name": "lstm_5_W",
+      "shape": [
+        1,
+        512,
+        128
+      ],
+      "stage": "stage1",
+      "len": 65536,
+      "checksum": "476ff5134b659159863b4584c1ac989db732982822358c079dd6544d12e941c2"
+    },
+    {
+      "name": "lstm_5_R",
+      "shape": [
+        1,
+        512,
+        128
+      ],
+      "stage": "stage1",
+      "len": 65536,
+      "checksum": "839632f1c328565bb3f69bb3013b77ac7aac806f7f660cec995c4a00d2883e8a"
+    },
+    {
+      "name": "lstm_5_B",
+      "shape": [
+        1,
+        1024
+      ],
+      "stage": "stage1",
+      "len": 1024,
+      "checksum": "5af26adbdb4e39cf2ace5508303a7dc7d94ce89534d62b908a0d527265559ba0"
+    },
+    {
+      "name": "dense_2/kernel:0",
+      "shape": [
+        128,
+        257
+      ],
+      "stage": "stage1",
+      "len": 32896,
+      "checksum": "17a56eadd87ba02512a41a984979db2426b3cebfa23b8833df64854e879bf5e9"
+    },
+    {
+      "name": "dense_2/bias:0",
+      "shape": [
+        257
+      ],
+      "stage": "stage1",
+      "len": 257,
+      "checksum": "4cc836f63047b03ea600153e824059769e99da38e17bfe0d1a75c0e7ed097294"
+    },
+    {
+      "name": "conv1d_2/kernel:0",
+      "shape": [
+        256,
+        512,
+        1
+      ],
+      "stage": "stage2",
+      "len": 131072,
+      "checksum": "7f937742a0ff909cf69ee29165f1b06d1c69d41533607c401f37f35bb8b009d8"
+    },
+    {
+      "name": "conv1d_3/kernel:0",
+      "shape": [
+        512,
+        256,
+        1
+      ],
+      "stage": "stage2",
+      "len": 131072,
+      "checksum": "f4670d1dfb24f24d6bf64af66cf3ff0a29a9d0c810c5e1b2edccc54f1bc02de3"
+    },
+    {
+      "name": "model_2/instant_layer_normalization_1/mul/ReadVariableOp/resource:0",
+      "shape": [
+        256
+      ],
+      "stage": "stage2",
+      "len": 256,
+      "checksum": "d2e9720ba30bf42e8412eeb21f66dfda5fc84b486459323f98b2692ec00f588d"
+    },
+    {
+      "name": "model_2/instant_layer_normalization_1/add_1/ReadVariableOp/resource:0",
+      "shape": [
+        256
+      ],
+      "stage": "stage2",
+      "len": 256,
+      "checksum": "dad4ef4f3cc6f75231182592428ca71721d3a464936f9a155ebcb8433bf2d9a5"
+    },
+    {
+      "name": "model_2/lstm_6/MatMul/ReadVariableOp/resource:0",
+      "shape": [
+        256,
+        512
+      ],
+      "stage": "stage2",
+      "len": 131072,
+      "checksum": "4b53d507e1d7aa3d371a48848be3b60b628362cad92b7e0019cdcfda06f21153"
+    },
+    {
+      "name": "model_2/lstm_6/MatMul_1/ReadVariableOp/resource:0",
+      "shape": [
+        128,
+        512
+      ],
+      "stage": "stage2",
+      "len": 65536,
+      "checksum": "84b461717bb3c2957b4a69dbc97a2eb77210eaab22d8b7dc9683dbc5e461d0de"
+    },
+    {
+      "name": "model_2/lstm_6/BiasAdd/ReadVariableOp/resource:0",
+      "shape": [
+        512
+      ],
+      "stage": "stage2",
+      "len": 512,
+      "checksum": "172e77cc956623c01296b3598abe8692b9aee8574794cf6ab918be9267fdf094"
+    },
+    {
+      "name": "model_2/lstm_7/MatMul/ReadVariableOp/resource:0",
+      "shape": [
+        128,
+        512
+      ],
+      "stage": "stage2",
+      "len": 65536,
+      "checksum": "ac2d1f4608cd8cb4b36634109e22b067f1555f7010916b726f85f22469806694"
+    },
+    {
+      "name": "model_2/lstm_7/MatMul_1/ReadVariableOp/resource:0",
+      "shape": [
+        128,
+        512
+      ],
+      "stage": "stage2",
+      "len": 65536,
+      "checksum": "36a74b210f2bf3a5f2e645191e5d749e268169e113df8f79cc9ea34bf9e7c835"
+    },
+    {
+      "name": "model_2/lstm_7/BiasAdd/ReadVariableOp/resource:0",
+      "shape": [
+        512
+      ],
+      "stage": "stage2",
+      "len": 512,
+      "checksum": "498d765b87b2c148751f8e0efa780cc148b0724a28e2755aea7c7483c96df733"
+    },
+    {
+      "name": "model_2/dense_3/Tensordot/Reshape_1:0",
+      "shape": [
+        128,
+        256
+      ],
+      "stage": "stage2",
+      "len": 32768,
+      "checksum": "6e3226f4a6ad4a6a6ec7c99091664ac99229560d67b687043216c6f5a18fa225"
+    },
+    {
+      "name": "model_2/dense_3/BiasAdd/ReadVariableOp/resource:0",
+      "shape": [
+        256
+      ],
+      "stage": "stage2",
+      "len": 256,
+      "checksum": "cd44caacc14880a2b4c497ddb50ce78d40ec5133b4f17bc9343c14e596e9b26e"
+    }
+  ]
+}

@@ -18,6 +18,7 @@ use crate::dsp::{
     dsp_denoiser::{DenoiseConfig as DspDenoiseConfig, DspDenoiser},
     dtln_denoiser::StereoDtlnDenoiser,
 };
+use crate::vs_log;
 
 /// Trait defining the interface for stereo denoisers
 pub trait StereoDenoiser {
@@ -54,18 +55,25 @@ impl StereoStreamingDenoiser {
     pub fn prepare(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
         if self.dtln_denoiser.is_none() {
-            match StereoDtlnDenoiser::new(sample_rate) {
-                Ok(dtln) => {
-                    self.dtln_denoiser = Some(dtln);
-                    #[cfg(feature = "debug")]
-                    eprintln!("[DENOISER] DTLN neural network models loaded successfully");
-                }
-                Err(_e) => {
-                    #[cfg(feature = "debug")]
-                    eprintln!("[DENOISER] FAILED to load DTLN models: {:?}", _e);
-                }
+            let mut dtln = StereoDtlnDenoiser::new(sample_rate);
+            // Test the models with a simple input to verify they work
+            let test_result = Self::test_dtln_models(&mut dtln);
+            if test_result {
+                self.dtln_denoiser = Some(dtln);
+                vs_log!("[DENOISER] DTLN neural network models loaded and verified successfully");
+            } else {
+                vs_log!("[DENOISER] DTLN models failed verification test");
             }
         }
+    }
+
+    fn test_dtln_models(dtln: &mut StereoDtlnDenoiser) -> bool {
+        // Test with a simple signal to verify the models work
+        let test_input = 0.1; // Small signal
+        let (out_l, out_r) = dtln.process_sample(test_input, test_input, 0.5, 0.5);
+
+        // Check if outputs are reasonable (finite and not NaN)
+        out_l.is_finite() && out_r.is_finite()
     }
 
     pub fn process_sample(
@@ -81,25 +89,21 @@ impl StereoStreamingDenoiser {
                 if let Some(d) = &mut self.dtln_denoiser {
                     d.reset();
                 }
-                #[cfg(feature = "debug")]
-                eprintln!("[DENOISER] Switched to DTLN neural network mode");
+                vs_log!("[DENOISER] Switched to DTLN neural network mode");
             } else {
                 self.current_use_dtln = false;
-                #[cfg(feature = "debug")]
-                eprintln!("[DENOISER] Switched to DSP spectral mode");
+                vs_log!("[DENOISER] Switched to DSP spectral mode");
             }
         }
 
-        if cfg.use_dtln && self.dtln_denoiser.is_some() {
-            // Route through DTLN implementation with speech confidence
+        if cfg.use_dtln {
             if let Some(d) = &mut self.dtln_denoiser {
-                // TODO: Pass speech_confidence through DTLN
-                // For now, DTLN accesses cfg.speech_confidence internally
-                d.process_sample(input_l, input_r, cfg.amount)
+                // Route through DTLN implementation with strength and tone parameters
+                d.process_sample(input_l, input_r, cfg.amount, cfg.tone)
             } else {
-                // Fallback if DTLN failed to load (should not happen with catch_unwind in initialize)
-                #[cfg(feature = "debug")]
-                eprintln!("[DENOISER] WARNING: DTLN not loaded, falling back to DSP");
+                // DTLN requested but not available - warn user and fall back
+                vs_log!("[DENOISER] DTLN not available, falling back to DSP");
+                // Potentially notify UI that DTLN isn't working
                 self.dsp_denoiser.process_sample(input_l, input_r, cfg)
             }
         } else {
@@ -124,6 +128,10 @@ impl StereoStreamingDenoiser {
         } else {
             self.dsp_denoiser.get_noise_confidence()
         }
+    }
+
+    pub fn is_dtln_available(&self) -> bool {
+        self.dtln_denoiser.is_some()
     }
 }
 

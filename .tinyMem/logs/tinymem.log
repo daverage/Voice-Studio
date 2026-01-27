@@ -1,14 +1,8 @@
-{"level":"info","ts":1769424294.781845,"caller":"tinymem/main.go:93","msg":"Starting MCP server"}
-{"level":"info","ts":1769424521.608468,"caller":"app/app.go:91","msg":"Database connection closed."}
-{"level":"info","ts":1769424634.120877,"caller":"tinymem/main.go:93","msg":"Starting MCP server"}
-{"level":"error","ts":1769424845.5910249,"caller":"tinymem/main.go:305","msg":"Root command execution failed","error":"unknown command \"status\" for \"tinymem\"\n\nDid you mean this?\n\tstats\n","stacktrace":"main.main\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/cmd/tinymem/main.go:305\nruntime.main\n\t/opt/homebrew/Cellar/go/1.25.6/libexec/src/runtime/proc.go:285"}
-{"level":"info","ts":1769424852.508919,"caller":"app/app.go:91","msg":"Database connection closed."}
-{"level":"info","ts":1769424889.936339,"caller":"app/app.go:91","msg":"Database connection closed."}
-{"level":"info","ts":1769424904.717814,"caller":"app/app.go:91","msg":"Database connection closed."}
-{"level":"info","ts":1769424909.910652,"caller":"app/app.go:91","msg":"Database connection closed."}
-{"level":"info","ts":1769424964.340495,"caller":"app/app.go:91","msg":"Database connection closed."}
-{"level":"info","ts":1769425526.3519201,"caller":"tinymem/main.go:93","msg":"Starting MCP server"}
-{"level":"info","ts":1769425536.421616,"caller":"tinymem/main.go:93","msg":"Starting MCP server"}
-{"level":"info","ts":1769425717.311944,"caller":"app/app.go:91","msg":"Database connection closed."}
-{"level":"info","ts":1769425725.092622,"caller":"app/app.go:91","msg":"Database connection closed."}
-{"level":"info","ts":1769425732.1776729,"caller":"app/app.go:91","msg":"Database connection closed."}
+{"level":"info","ts":1769464460.789912,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"info","ts":1769464514.408742,"caller":"app/app.go:94","msg":"Database connection closed."}
+{"level":"info","ts":1769464662.3125918,"caller":"app/app.go:94","msg":"Database connection closed."}
+{"level":"info","ts":1769464679.128911,"caller":"app/app.go:94","msg":"Database connection closed."}
+{"level":"info","ts":1769466643.5881228,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"info","ts":1769469299.4646358,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"info","ts":1769507264.603961,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}
+{"level":"info","ts":1769507464.5697038,"caller":"tinymem/main.go:133","msg":"Starting MCP server"}

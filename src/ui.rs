@@ -1,3 +1,6 @@
+#[cfg(feature = "debug")]
+use crate::vs_log;
+
 use crate::macro_controller;
 use crate::meters::Meters;
 use crate::presets::{DspPreset, OutputPreset};
@@ -41,27 +44,27 @@ impl Model for Data {
                 let theme_path = resolve_theme_css_path();
                 let css_path = if let Some(path) = theme_path {
                     if path.exists() {
-                        eprintln!("[CSS Editor] Opening existing file: {:?}", path);
+                        vs_log!("[CSS Editor] Opening existing file: {:?}", path);
                         path
                     } else {
-                        eprintln!("[CSS Editor] Creating new file: {:?}", path);
+                        vs_log!("[CSS Editor] Creating new file: {:?}", path);
                         if let Some(parent) = path.parent() {
                             if let Err(e) = std::fs::create_dir_all(parent) {
-                                eprintln!("[CSS Editor] Failed to create directory: {}", e);
+                                vs_log!("[CSS Editor] Failed to create directory: {}", e);
                             }
                         }
                         if let Err(e) = std::fs::write(&path, STYLE) {
-                            eprintln!("[CSS Editor] Failed to write CSS file: {}", e);
+                            vs_log!("[CSS Editor] Failed to write CSS file: {}", e);
                         } else {
-                            eprintln!("[CSS Editor] CSS file written successfully");
+                            vs_log!("[CSS Editor] CSS file written successfully");
                         }
                         path
                     }
                 } else {
                     let temp_path = std::env::temp_dir().join("voice_studio_ui.css");
-                    eprintln!("[CSS Editor] Using temp file: {:?}", temp_path);
+                    vs_log!("[CSS Editor] Using temp file: {:?}", temp_path);
                     if let Err(e) = std::fs::write(&temp_path, STYLE) {
-                        eprintln!("[CSS Editor] Failed to write temp CSS file: {}", e);
+                        vs_log!("[CSS Editor] Failed to write temp CSS file: {}", e);
                     }
                     temp_path
                 };
@@ -71,7 +74,7 @@ impl Model for Data {
                     *path = css_path.clone();
                 }
 
-                eprintln!("[CSS Editor] Attempting to open: {:?}", css_path);
+                vs_log!("[CSS Editor] Attempting to open: {:?}", css_path);
 
                 // Open in system default editor
                 #[cfg(target_os = "macos")]
@@ -81,8 +84,8 @@ impl Model for Data {
                         .arg(&css_path)
                         .spawn()
                     {
-                        Ok(_) => eprintln!("[CSS Editor] Editor launched successfully"),
-                        Err(e) => eprintln!("[CSS Editor] Failed to open editor: {}", e),
+                        Ok(_) => vs_log!("[CSS Editor] Editor launched successfully"),
+                        Err(e) => vs_log!("[CSS Editor] Failed to open editor: {}", e),
                     }
                 }
                 #[cfg(target_os = "linux")]
@@ -91,22 +94,22 @@ impl Model for Data {
                         .arg(&css_path)
                         .spawn()
                     {
-                        Ok(_) => eprintln!("[CSS Editor] Editor launched successfully"),
-                        Err(e) => eprintln!("[CSS Editor] Failed to open editor: {}", e),
+                        Ok(_) => vs_log!("[CSS Editor] Editor launched successfully"),
+                        Err(e) => vs_log!("[CSS Editor] Failed to open editor: {}", e),
                     }
                 }
                 #[cfg(target_os = "windows")]
                 {
                     match std::process::Command::new("notepad").arg(&css_path).spawn() {
-                        Ok(_) => eprintln!("[CSS Editor] Editor launched successfully"),
-                        Err(e) => eprintln!("[CSS Editor] Failed to open editor: {}", e),
+                        Ok(_) => vs_log!("[CSS Editor] Editor launched successfully"),
+                        Err(e) => vs_log!("[CSS Editor] Failed to open editor: {}", e),
                     }
                 }
             }
             CssEditorEvent::ReloadStyles => {
                 // Reload stylesheets (re-reads any file-based styles)
                 if let Err(e) = cx.reload_styles() {
-                    eprintln!("Failed to reload styles: {}", e);
+                    vs_log!("Failed to reload styles: {}", e);
                 }
                 cx.needs_relayout();
                 cx.needs_redraw();
@@ -904,7 +907,13 @@ fn build_macro(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiConte
     .class("macro-column");
 }
 
-fn build_clean(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
+fn build_clean(
+    cx: &mut Context,
+    params: Arc<VoiceParams>,
+    gui: Arc<dyn GuiContext>,
+    meters: Arc<Meters>,
+) {
+    let meters_indicator = meters.clone();
     VStack::new(cx, move |cx| {
         Label::new(cx, "CLEAN & REPAIR")
             .class("column-header")
@@ -962,6 +971,32 @@ fn build_clean(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiConte
             );
         })
         .class("toggle-row");
+
+        // DTLN Availability Indicator
+        HStack::new(cx, move |cx| {
+            Label::new(cx, "").class("dtln-indicator-label"); // Empty label for alignment
+
+            Binding::new(
+                cx,
+                Data::params.map(|p| p.use_dtln.value()),
+                move |cx, lens| {
+                    let dtln_enabled = lens.get(cx);
+                    let dtln_available = meters_indicator.is_dtln_available();
+
+                    HStack::new(cx, move |cx| {
+                        if dtln_enabled && !dtln_available {
+                            Label::new(cx, "DTLN Unavailable").class("dtln-warning");
+                        } else if dtln_enabled {
+                            Label::new(cx, "DTLN Active").class("dtln-active");
+                        } else {
+                            Label::new(cx, "DSP Active").class("dtln-inactive");
+                        }
+                    })
+                    .class("dtln-status-container");
+                },
+            );
+        })
+        .class("dtln-indicator-row");
 
         create_slider(
             cx,
@@ -1322,7 +1357,7 @@ pub fn build_ui(
                 let _ = std::fs::create_dir_all(parent);
             }
             if let Err(e) = std::fs::write(&css_path, STYLE) {
-                eprintln!("Failed to write CSS file: {}", e);
+                vs_log!("Failed to write CSS file: {}", e);
             }
         }
 
@@ -1373,7 +1408,7 @@ pub fn build_ui(
                             build_macro(cx, p.clone(), g.clone());
                             Element::new(cx).class("fill-width");
                         } else {
-                            build_clean(cx, p.clone(), g.clone());
+                            build_clean(cx, p.clone(), g.clone(), meters_local.clone());
                             build_polish(cx, p.clone(), g.clone());
                         }
                     })

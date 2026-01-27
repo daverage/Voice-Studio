@@ -333,11 +333,13 @@ struct DspDenoiserDetector {
     window: Vec<f32>,
 
     scratch: Vec<Complex<f32>>,
+    fft_scratch: Vec<Complex<f32>>,
     mag: Vec<f32>,
     prev_mag: Vec<f32>,
     prev_spec: Vec<Complex<f32>>,
 
     fft_coarse: Arc<dyn Fft<f32>>,
+    fft_coarse_scratch: Vec<Complex<f32>>,
     win_size_coarse: usize,
     window_coarse: Vec<f32>,
     scratch_coarse: Vec<Complex<f32>>,
@@ -361,12 +363,18 @@ impl DspDenoiserDetector {
     pub fn new(win_size: usize, hop_size: usize) -> Self {
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(win_size);
+        let fft_scratch_len = fft.get_inplace_scratch_len();
+        let fft_scratch = vec![Complex::default(); fft_scratch_len];
+
         let window = make_sqrt_hann_window(win_size);
 
         let win_size_coarse = (win_size / COARSE_WIN_DIV)
             .max(COARSE_WIN_MIN)
             .min(win_size);
         let fft_coarse = planner.plan_fft_forward(win_size_coarse);
+        let fft_coarse_scratch_len = fft_coarse.get_inplace_scratch_len();
+        let fft_coarse_scratch = vec![Complex::default(); fft_coarse_scratch_len];
+
         let window_coarse = make_sqrt_hann_window(win_size_coarse);
 
         let nyq = win_size / 2;
@@ -378,11 +386,13 @@ impl DspDenoiserDetector {
             hop_size,
             window,
             scratch: vec![Complex::new(0.0, 0.0); win_size],
+            fft_scratch,
             mag: vec![0.0; nyq + 1],
             prev_mag: vec![0.0; nyq + 1],
             prev_spec: vec![Complex::new(0.0, 0.0); nyq + 1],
 
             fft_coarse,
+            fft_coarse_scratch,
             win_size_coarse,
             window_coarse,
             scratch_coarse: vec![Complex::new(0.0, 0.0); win_size_coarse],
@@ -395,7 +405,7 @@ impl DspDenoiserDetector {
 
             frame_time: vec![0.0; win_size],
             peaks_buf: Vec::with_capacity(MASKER_MAX_PEAKS),
-            f0_scratch: Vec::with_capacity(win_size),
+            f0_scratch: vec![0.0; win_size], // Changed from Vec::with_capacity to pre-allocated vector
             noise_confidence: 1.0,
             prev_rms: 0.0,
             transient_hold: 0,
@@ -464,7 +474,14 @@ impl DspDenoiserDetector {
         }
 
         // 1) FFT
-        self.fft.process(&mut self.scratch);
+        #[cfg(debug_assertions)]
+        assert_no_alloc::assert_no_alloc(|| {
+            self.fft
+                .process_with_scratch(&mut self.scratch, &mut self.fft_scratch);
+        });
+        #[cfg(not(debug_assertions))]
+        self.fft
+            .process_with_scratch(&mut self.scratch, &mut self.fft_scratch);
 
         // 2) Magnitudes
         for i in 0..=nyq {
@@ -710,7 +727,14 @@ impl DspDenoiserDetector {
         for i in 0..n2 {
             self.scratch_coarse[i] = Complex::new(mono[i] * self.window_coarse[i], 0.0);
         }
-        self.fft_coarse.process(&mut self.scratch_coarse);
+        #[cfg(debug_assertions)]
+        assert_no_alloc::assert_no_alloc(|| {
+            self.fft_coarse
+                .process_with_scratch(&mut self.scratch_coarse, &mut self.fft_coarse_scratch);
+        });
+        #[cfg(not(debug_assertions))]
+        self.fft_coarse
+            .process_with_scratch(&mut self.scratch_coarse, &mut self.fft_coarse_scratch);
         for i in 0..=nyq2 {
             let mag = self.scratch_coarse[i].norm().max(MAG_FLOOR);
             let nf = self.noise_floor_coarse[i];
@@ -824,8 +848,10 @@ impl DspDenoiserDetector {
         let nyq = self.win_size / 2;
         self.masker_buf.fill(0.0);
 
-        // Find spectral peaks
-        self.peaks_buf.clear();
+        // Find spectral peaks - use a fixed-size array instead of Vec to avoid allocation
+        let mut peaks_temp: [(usize, f32); MASKER_MAX_PEAKS] = [(0, 0.0); MASKER_MAX_PEAKS];
+        let mut peak_count = 0;
+
         for i in 2..nyq - 2 {
             let m = self.mag[i];
             if m > self.mag[i - 1]
@@ -835,20 +861,28 @@ impl DspDenoiserDetector {
                 && m > 1e-6
             // Significant peak
             {
-                self.peaks_buf.push((i, m));
-                if self.peaks_buf.len() >= MASKER_MAX_PEAKS {
+                if peak_count < MASKER_MAX_PEAKS {
+                    peaks_temp[peak_count] = (i, m);
+                    peak_count += 1;
+                } else {
                     break;
                 }
             }
         }
 
-        // Sort peaks by magnitude (descending)
-        self.peaks_buf
-            .sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // Sort peaks by magnitude (descending) - using a simple bubble sort for small arrays
+        for i in 0..peak_count {
+            for j in i + 1..peak_count {
+                if peaks_temp[i].1 < peaks_temp[j].1 {
+                    peaks_temp.swap(i, j);
+                }
+            }
+        }
 
         // For each peak, spread its influence
         let bin_width = sr / self.win_size as f32;
-        for &(peak_bin, peak_mag) in &self.peaks_buf {
+        for i in 0..peak_count {
+            let (peak_bin, peak_mag) = peaks_temp[i];
             if peak_mag <= MAG_FLOOR {
                 continue;
             }
@@ -966,6 +1000,8 @@ struct StreamingDenoiserChannel {
 
     window: Vec<f32>,
     scratch: Vec<Complex<f32>>,
+    fft_scratch: Vec<Complex<f32>>,
+    ifft_scratch: Vec<Complex<f32>>,
     overlap: Vec<f32>,
     ola_norm: Vec<f32>,
     frame_in: Vec<f32>,
@@ -992,6 +1028,12 @@ impl StreamingDenoiserChannel {
         let fft = planner.plan_fft_forward(win_size);
         let ifft = planner.plan_fft_inverse(win_size);
 
+        let fft_scratch_len = fft.get_inplace_scratch_len();
+        let ifft_scratch_len = ifft.get_inplace_scratch_len();
+
+        let fft_scratch = vec![Complex::default(); fft_scratch_len];
+        let ifft_scratch = vec![Complex::default(); ifft_scratch_len];
+
         Self {
             input_producer: in_prod,
             input_consumer: in_cons,
@@ -1001,6 +1043,8 @@ impl StreamingDenoiserChannel {
             hop_size,
             window,
             scratch: vec![Complex::new(0.0, 0.0); win_size],
+            fft_scratch,
+            ifft_scratch,
             overlap: vec![0.0; win_size],
             ola_norm: vec![0.0; win_size],
             frame_in: vec![0.0; win_size],
@@ -1049,7 +1093,14 @@ impl StreamingDenoiserChannel {
         }
 
         // Forward FFT
-        self.fft.process(&mut self.scratch);
+        #[cfg(debug_assertions)]
+        assert_no_alloc::assert_no_alloc(|| {
+            self.fft
+                .process_with_scratch(&mut self.scratch, &mut self.fft_scratch);
+        });
+        #[cfg(not(debug_assertions))]
+        self.fft
+            .process_with_scratch(&mut self.scratch, &mut self.fft_scratch);
 
         // Apply gains (only to first half, second half is conjugate symmetry)
         let nyq = self.win_size / 2;
@@ -1070,7 +1121,14 @@ impl StreamingDenoiserChannel {
         }
 
         // Inverse FFT
-        self.ifft.process(&mut self.scratch);
+        #[cfg(debug_assertions)]
+        assert_no_alloc::assert_no_alloc(|| {
+            self.ifft
+                .process_with_scratch(&mut self.scratch, &mut self.ifft_scratch);
+        });
+        #[cfg(not(debug_assertions))]
+        self.ifft
+            .process_with_scratch(&mut self.scratch, &mut self.ifft_scratch);
 
         // Overlap-add synthesis
         let norm = 1.0 / self.win_size as f32;

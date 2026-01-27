@@ -3,6 +3,8 @@
 //! Provides a feature-gated logging mechanism that is safe for use
 //! (with caution) during real-time processing.
 
+use std::fmt;
+
 #[cfg(feature = "debug")]
 pub mod logger {
     use std::cell::UnsafeCell;
@@ -81,12 +83,7 @@ pub mod logger {
 
     pub fn init_logger() {
         let _ = LOGGER.get_or_init(LogRing::new);
-        let enabled = match std::env::var("VX_LOG").as_deref() {
-            Ok("0") | Ok("false") | Ok("no") => false,
-            Ok("1") | Ok("true") | Ok("yes") => true,
-            _ => true,
-        };
-        LOG_ENABLED.store(enabled, Ordering::Relaxed);
+        LOG_ENABLED.store(true, Ordering::Relaxed);
     }
 
     struct FixedBuf {
@@ -166,12 +163,17 @@ pub mod logger {
     }
 }
 
+#[cfg(feature = "debug")]
+pub(crate) fn vs_log_inner(args: fmt::Arguments) {
+    logger::log_args(args);
+}
+
+#[cfg(not(feature = "debug"))]
+pub(crate) fn vs_log_inner(_args: fmt::Arguments) {}
+
 #[macro_export]
 macro_rules! vs_log {
     ($($arg:tt)*) => {
-        #[cfg(feature = "debug")]
-        {
-            $crate::debug::logger::log_args(format_args!($($arg)*));
-        }
+        $crate::debug::vs_log_inner(format_args!($($arg)*))
     };
 }

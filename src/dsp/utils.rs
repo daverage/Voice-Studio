@@ -103,7 +103,7 @@ pub fn update_env_sq(env_sq: f32, in_sq: f32, attack: f32, release: f32) -> f32 
 /// Autocorrelation-based F0 estimation (lightweight, speech-focused).
 /// Returns (periodicity 0..1, f0_hz).
 ///
-/// `scratch` must have capacity >= frame.len(). It will be cleared and reused
+/// `scratch` must have capacity >= frame.len(). It will be filled without reallocation
 /// to avoid audio-thread allocations.
 pub fn estimate_f0_autocorr(frame: &[f32], scratch: &mut Vec<f32>, sample_rate: f32) -> (f32, f32) {
     let n = frame.len();
@@ -111,8 +111,12 @@ pub fn estimate_f0_autocorr(frame: &[f32], scratch: &mut Vec<f32>, sample_rate: 
         return (0.0, 0.0);
     }
 
+    // Ensure scratch buffer is the right size to avoid allocation
+    if scratch.len() != n {
+        scratch.resize(n, 0.0);
+    }
+
     // Remove DC + simple pre-emphasis - reuse scratch buffer
-    scratch.clear();
     let mut mean = 0.0f32;
     for &v in frame {
         mean += v;
@@ -120,11 +124,11 @@ pub fn estimate_f0_autocorr(frame: &[f32], scratch: &mut Vec<f32>, sample_rate: 
     mean /= n as f32;
 
     let mut prev = 0.0f32;
-    for &v in frame {
+    for (i, &v) in frame.iter().enumerate() {
         let d = v - mean;
         let y = d - 0.97 * prev;
         prev = d;
-        scratch.push(y);
+        scratch[i] = y; // Direct assignment instead of push to avoid reallocation
     }
     let x = scratch;
 

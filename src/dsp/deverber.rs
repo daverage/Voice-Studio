@@ -165,6 +165,8 @@ pub struct StreamingDeverber {
     window: Vec<f32>,
 
     scratch: Vec<Complex<f32>>,
+    fft_scratch: Vec<Complex<f32>>,
+    ifft_scratch: Vec<Complex<f32>>,
     overlap: Vec<f32>,
     ola_norm: Vec<f32>,
     frame_in: Vec<f32>,
@@ -182,6 +184,12 @@ impl StreamingDeverber {
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(win_size);
         let ifft = planner.plan_fft_inverse(win_size);
+
+        let fft_scratch_len = fft.get_inplace_scratch_len();
+        let ifft_scratch_len = ifft.get_inplace_scratch_len();
+
+        let fft_scratch = vec![Complex::default(); fft_scratch_len];
+        let ifft_scratch = vec![Complex::default(); ifft_scratch_len];
 
         let window = make_sqrt_hann_window(win_size);
 
@@ -203,6 +211,8 @@ impl StreamingDeverber {
             hop_size,
             window,
             scratch: vec![Complex::new(0.0, 0.0); win_size],
+            fft_scratch,
+            ifft_scratch,
             overlap: vec![0.0; win_size],
             ola_norm: vec![0.0; win_size],
             frame_in: vec![0.0; win_size],
@@ -266,7 +276,14 @@ impl StreamingDeverber {
             for i in 0..self.win_size {
                 self.scratch[i] = Complex::new(self.frame_in[i] * self.window[i], 0.0);
             }
-            self.fft.process(&mut self.scratch);
+            #[cfg(debug_assertions)]
+            assert_no_alloc::assert_no_alloc(|| {
+                self.fft
+                    .process_with_scratch(&mut self.scratch, &mut self.fft_scratch);
+            });
+            #[cfg(not(debug_assertions))]
+            self.fft
+                .process_with_scratch(&mut self.scratch, &mut self.fft_scratch);
 
             // 2. Apply gains
             let nyq = self.win_size / 2;
@@ -283,7 +300,14 @@ impl StreamingDeverber {
             }
 
             // 3. IFFT + Overlap
-            self.ifft.process(&mut self.scratch);
+            #[cfg(debug_assertions)]
+            assert_no_alloc::assert_no_alloc(|| {
+                self.ifft
+                    .process_with_scratch(&mut self.scratch, &mut self.ifft_scratch);
+            });
+            #[cfg(not(debug_assertions))]
+            self.ifft
+                .process_with_scratch(&mut self.scratch, &mut self.ifft_scratch);
             let norm = 1.0 / self.win_size as f32;
 
             for i in 0..self.win_size {
@@ -336,6 +360,7 @@ pub struct StereoDeverberDetector {
 
     // Analysis buffers
     scratch: Vec<Complex<f32>>,
+    fft_scratch: Vec<Complex<f32>>,
     mag: Vec<f32>,
 
     prev_mag: Vec<f32>,
@@ -356,6 +381,8 @@ impl StereoDeverberDetector {
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(win_size);
 
+        let fft_scratch_len = fft.get_inplace_scratch_len();
+
         let window = make_sqrt_hann_window(win_size);
 
         let nyq = win_size / 2;
@@ -366,6 +393,7 @@ impl StereoDeverberDetector {
             hop_size,
             window,
             scratch: vec![Complex::new(0.0, 0.0); win_size],
+            fft_scratch: vec![Complex::default(); fft_scratch_len],
             mag: vec![0.0; nyq + 1],
             prev_mag: vec![0.0; nyq + 1],
             late_env: vec![0.0; nyq + 1],
@@ -374,7 +402,7 @@ impl StereoDeverberDetector {
             gain_mask: vec![1.0; nyq + 1],
             frame_time: vec![0.0; win_size],
             gain_smooth: vec![1.0; nyq + 1],
-            f0_scratch: Vec::with_capacity(win_size),
+            f0_scratch: vec![0.0; win_size], // Changed from Vec::with_capacity to pre-allocated vector
         }
     }
 
@@ -429,7 +457,14 @@ impl StereoDeverberDetector {
             self.scratch[i] = Complex::new(mono[i] * self.window[i], 0.0);
         }
 
-        self.fft.process(&mut self.scratch);
+        #[cfg(debug_assertions)]
+        assert_no_alloc::assert_no_alloc(|| {
+            self.fft
+                .process_with_scratch(&mut self.scratch, &mut self.fft_scratch);
+        });
+        #[cfg(not(debug_assertions))]
+        self.fft
+            .process_with_scratch(&mut self.scratch, &mut self.fft_scratch);
 
         for i in 0..=nyq {
             self.mag[i] = self.scratch[i].norm().max(MAG_FLOOR);

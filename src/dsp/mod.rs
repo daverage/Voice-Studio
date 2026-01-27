@@ -37,7 +37,11 @@ pub mod de_esser;
 pub mod denoiser;
 pub mod deverber;
 pub mod dsp_denoiser;
+pub mod dtln_core;
 pub mod dtln_denoiser;
+#[cfg(feature = "tflite_validate")]
+pub mod dtln_denoiser_tflite;
+pub mod dtln_weights;
 pub mod early_reflection;
 pub mod envelope;
 pub mod limiter;
@@ -59,6 +63,10 @@ pub use control_slew::SpectralControlLimiters;
 pub use de_esser::{DeEsserBand, DeEsserDetector};
 pub use denoiser::{DenoiseConfig, StereoStreamingDenoiser};
 pub use deverber::StreamingDeverber;
+pub use dtln_core::DtlnCore;
+#[cfg(feature = "tflite_validate")]
+pub use dtln_denoiser_tflite::StereoDtlnDenoiserTflite;
+pub use dtln_weights::{DtlnWeights, DTLN_WEIGHTS};
 pub use early_reflection::EarlyReflectionSuppressor;
 pub use envelope::VoiceEnvelopeTracker;
 pub use limiter::LinkedLimiter;
