@@ -29,15 +29,27 @@ const STYLE: &str = include_str!("ui.css");
 // ============================================================================ 
 
 #[derive(Lens, Clone)]
-pub struct Data {
+pub struct VoiceStudioData {
     pub params: Arc<VoiceParams>,
+    pub advanced_tab: AdvancedTab,
     #[cfg(feature = "debug")]
     pub css_temp_path: Arc<Mutex<std::path::PathBuf>>,
 }
 
-impl Model for Data {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Data)]
+pub enum AdvancedTab {
+    CleanRepair,
+    Shape,
+    Dynamics,
+}
+
+impl Model for VoiceStudioData {
     #[allow(unused_variables)]
     fn event(&mut self, cx: &mut EventContext, event: &mut Event) {
+        event.map(|advanced_tab_event, _| match advanced_tab_event {
+            AdvancedTabEvent::SetTab(tab) => self.advanced_tab = *tab,
+        });
+
         #[cfg(feature = "debug")]
         event.map(|css_event, _| match css_event {
             CssEditorEvent::OpenExternalEditor => {
@@ -118,6 +130,11 @@ impl Model for Data {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum AdvancedTabEvent {
+    SetTab(AdvancedTab),
+}
+
 #[cfg(feature = "debug")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum CssEditorEvent {
@@ -127,7 +144,7 @@ pub enum CssEditorEvent {
 
 // NOTE: kept from your file (even if unused)
 #[allow(dead_code)]
-type VoiceParamsBoolLens = Map<Wrapper<data_derived_lenses::params>, bool>;
+type VoiceParamsBoolLens = Map<Wrapper<voice_studio_data_derived_lenses::params>, bool>;
 
 // ============================================================================ 
 // METERS
@@ -207,13 +224,19 @@ impl View for LevelMeter {
 
             let paint = if is_gr {
                 vg::Paint::linear_gradient(
-                    b.x, b.y, b.x, b.y + b.h,
+                    b.x,
+                    b.y,
+                    b.x,
+                    b.y + b.h,
                     vg::Color::rgb(239, 68, 68),
                     vg::Color::rgb(249, 115, 22),
                 )
             } else {
                 vg::Paint::linear_gradient(
-                    b.x, b.y + b.h, b.x, b.y,
+                    b.x,
+                    b.y + b.h,
+                    b.x,
+                    b.y,
                     vg::Color::rgb(34, 197, 94),
                     vg::Color::rgb(239, 68, 68),
                 )
@@ -372,10 +395,11 @@ impl View for NoiseFloorLeds {
 // SLIDER VISUALS + DIAL VISUALS
 // ============================================================================ 
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Data)]
 pub(crate) enum ParamId {
     NoiseReduction,
-    NoiseTone,
+    RumbleAmount,
+    HissAmount,
     NoiseLearnAmount,
     ReverbReduction,
     Clarity,
@@ -409,7 +433,8 @@ impl View for SliderVisuals {
         let b = cx.bounds();
         let val = match self.param_id {
             ParamId::NoiseReduction => self.params.noise_reduction.modulated_normalized_value(),
-            ParamId::NoiseTone => self.params.noise_tone.modulated_normalized_value(),
+            ParamId::RumbleAmount => self.params.rumble_amount.modulated_normalized_value(),
+            ParamId::HissAmount => self.params.hiss_amount.modulated_normalized_value(),
             ParamId::NoiseLearnAmount => self.params.noise_learn_amount.modulated_normalized_value(),
             ParamId::ReverbReduction => self.params.reverb_reduction.modulated_normalized_value(),
             ParamId::Clarity => self.params.clarity.modulated_normalized_value(),
@@ -418,9 +443,9 @@ impl View for SliderVisuals {
             ParamId::Leveler => self.params.leveler.modulated_normalized_value(),
             ParamId::OutputGain => self.params.output_gain.modulated_normalized_value(),
             ParamId::BreathControl => self.params.breath_control.modulated_normalized_value(),
-            ParamId::MacroDistance => self.params.macro_distance.modulated_normalized_value(),
-            ParamId::MacroClarity => self.params.macro_clarity.modulated_normalized_value(),
-            ParamId::MacroConsistency => self.params.macro_consistency.modulated_normalized_value(),
+            ParamId::MacroDistance => self.params.macro_clean.modulated_normalized_value(),
+            ParamId::MacroClarity => self.params.macro_enhance.modulated_normalized_value(),
+            ParamId::MacroConsistency => self.params.macro_control.modulated_normalized_value(),
         };
 
         let mut bg = vg::Path::new();
@@ -431,29 +456,7 @@ impl View for SliderVisuals {
             &vg::Paint::color(vg::Color::rgb(51, 65, 85)).with_line_width(1.0),
         );
 
-        if self.param_id == ParamId::NoiseTone {
-            let cx0 = b.x + b.w / 2.0;
-            let vx = b.x + b.w * val;
-            let (sx, w) = if val >= 0.5 {
-                (cx0, vx - cx0)
-            } else {
-                (vx, cx0 - vx)
-            };
-
-            if w > 0.5 {
-                let mut f = vg::Path::new();
-                f.rounded_rect(sx, b.y, w, b.h, 3.0);
-                canvas.fill_path(&f, &vg::Paint::color(vg::Color::rgba(59, 130, 246, 180)));
-            }
-
-            let mut c = vg::Path::new();
-            c.move_to(cx0, b.y);
-            c.line_to(cx0, b.y + b.h);
-            canvas.stroke_path(
-                &c,
-                &vg::Paint::color(vg::Color::rgba(255, 255, 255, 40)).with_line_width(1.0),
-            );
-        } else if val > 0.0 {
+        if val > 0.0 {
             let mut f = vg::Path::new();
             f.rounded_rect(b.x, b.y, b.w * val, b.h, 3.0);
             canvas.fill_path(&f, &vg::Paint::color(vg::Color::rgba(59, 130, 246, 180)));
@@ -481,9 +484,9 @@ impl View for DialVisuals {
         let b = cx.bounds();
 
         let val = match self.param_id {
-            ParamId::MacroDistance => self.params.macro_distance.modulated_normalized_value(),
-            ParamId::MacroClarity => self.params.macro_clarity.modulated_normalized_value(),
-            ParamId::MacroConsistency => self.params.macro_consistency.modulated_normalized_value(),
+            ParamId::MacroDistance => self.params.macro_clean.modulated_normalized_value(),
+            ParamId::MacroClarity => self.params.macro_enhance.modulated_normalized_value(),
+            ParamId::MacroConsistency => self.params.macro_control.modulated_normalized_value(),
             _ => 0.0,
         }
         .clamp(0.0, 1.0);
@@ -568,7 +571,7 @@ where
         HStack::new(cx, move |cx| {
             Label::new(cx, label).class("slider-label").text_wrap(false);
             Element::new(cx).class("fill-width");
-            let lens = ParamWidgetBase::make_lens(Data::params, map, |p: &P| {
+            let lens = ParamWidgetBase::make_lens(VoiceStudioData::params, map, |p: &P| {
                 p.normalized_value_to_string(p.unmodulated_normalized_value(), true)
             });
             Label::new(cx, lens).class("slider-value");
@@ -577,7 +580,7 @@ where
 
         ZStack::new(cx, move |cx| {
             SliderVisuals::new(cx, params.clone(), id).class("fill-both");
-            ParamSlider::new(cx, Data::params, move |p| map(p))
+            ParamSlider::new(cx, VoiceStudioData::params, move |p| map(p))
                 .class("fill-both")
                 .class("input-hidden");
         })
@@ -610,7 +613,7 @@ where
             DialVisuals::new(cx, params.clone(), id).class("fill-both");
 
             // Interactive slider (in front, invisible)
-            ParamSlider::new(cx, Data::params, move |p| map(p))
+            ParamSlider::new(cx, VoiceStudioData::params, move |p| map(p))
                 .class("fill-both")
                 .class("input-hidden")
                 .z_index(1);
@@ -618,7 +621,7 @@ where
         .class("dial-visual");
 
         // Value display
-        let lens = ParamWidgetBase::make_lens(Data::params, map, |p: &P| {
+        let lens = ParamWidgetBase::make_lens(VoiceStudioData::params, map, |p: &P| {
             p.normalized_value_to_string(p.unmodulated_normalized_value(), true)
         });
         Label::new(cx, lens).class("dial-value");
@@ -636,7 +639,7 @@ fn create_dropdown<'a>(
         Label::new(cx, label).class("dropdown-label");
 
         let lens = ParamWidgetBase::make_lens(
-            Data::params,
+            VoiceStudioData::params,
             |p| &p.final_output_preset,
             |p| p.normalized_value_to_string(p.unmodulated_normalized_value(), true),
         );
@@ -684,7 +687,7 @@ fn create_dsp_preset_dropdown<'a>(
         Label::new(cx, label).class("dropdown-label");
 
         let lens = ParamWidgetBase::make_lens(
-            Data::params,
+            VoiceStudioData::params,
             |p| &p.dsp_preset,
             |p| p.normalized_value_to_string(p.unmodulated_normalized_value(), true),
         );
@@ -759,30 +762,18 @@ fn create_dsp_preset_dropdown<'a>(
                                     );
                                     setter.end_set_parameter(&params_item.breath_control);
 
-                                    // Also update macro controls to match (reverse mapping)
-                                    let (distance, clarity_macro, consistency) =
-                                        macro_controller::estimate_macros_from_advanced(
-                                            values.noise_reduction,
-                                            values.reverb_reduction,
-                                            values.proximity,
-                                            values.clarity,
-                                            values.de_esser,
-                                            values.leveler,
-                                            values.breath_control,
-                                        );
+                                    setter.begin_set_parameter(&params_item.macro_clean);
+                                    setter.set_parameter(&params_item.macro_clean, values.macro_clean);
+                                    setter.end_set_parameter(&params_item.macro_clean);
 
-                                    setter.begin_set_parameter(&params_item.macro_distance);
-                                    setter.set_parameter(&params_item.macro_distance, distance);
-                                    setter.end_set_parameter(&params_item.macro_distance);
+                                    setter.begin_set_parameter(&params_item.macro_enhance);
+                                    setter.set_parameter(&params_item.macro_enhance, values.macro_enhance);
+                                    setter.end_set_parameter(&params_item.macro_enhance);
 
-                                    setter.begin_set_parameter(&params_item.macro_clarity);
-                                    setter.set_parameter(&params_item.macro_clarity, clarity_macro);
-                                    setter.end_set_parameter(&params_item.macro_clarity);
-
-                                    setter.begin_set_parameter(&params_item.macro_consistency);
+                                    setter.begin_set_parameter(&params_item.macro_control);
                                     setter
-                                        .set_parameter(&params_item.macro_consistency, consistency);
-                                    setter.end_set_parameter(&params_item.macro_consistency);
+                                        .set_parameter(&params_item.macro_control, values.macro_control);
+                                    setter.end_set_parameter(&params_item.macro_control);
                                 }
 
                                 cx.emit(PopupEvent::Close);
@@ -884,12 +875,12 @@ fn build_macro(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiConte
     VStack::new(cx, move |cx| {
         Binding::new(
             cx,
-            Data::params.map(|p| {
+            VoiceStudioData::params.map(|p| {
                 (
                     p.macro_mode.value(),
-                    p.macro_distance.value(),
-                    p.macro_clarity.value(),
-                    p.macro_consistency.value(),
+                    p.macro_clean.value(),
+                    p.macro_enhance.value(),
+                    p.macro_control.value(),
                 )
             }),
             move |cx, lens| {
@@ -916,205 +907,230 @@ fn build_macro(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiConte
 
         HStack::new(cx, move |cx| {
             let p = params_dials.clone();
-            create_macro_dial(cx, "DISTANCE", p.clone(), ParamId::MacroDistance, |pp| {
-                &pp.macro_distance
+            create_macro_dial(cx, "CLEAN", p.clone(), ParamId::MacroDistance, |pp| {
+                &pp.macro_clean
             });
-            create_macro_dial(cx, "CLARITY", p.clone(), ParamId::MacroClarity, |pp| {
-                &pp.macro_clarity
+            create_macro_dial(cx, "ENHANCE", p.clone(), ParamId::MacroClarity, |pp| {
+                &pp.macro_enhance
             });
             create_macro_dial(
-                cx,
-                "CONSISTENCY",
-                p.clone(),
-                ParamId::MacroConsistency,
-                |pp| &pp.macro_consistency,
+                cx, "CONTROL", p.clone(), ParamId::MacroConsistency,
+                |pp| &pp.macro_control,
             );
         })
         .class("dials-container");
 
         Element::new(cx).class("fill-height");
-
-        create_dropdown(
-            cx,
-            "FINAL OUTPUT",
-            params_dropdown.clone(),
-            gui_dropdown.clone(),
-        );
     })
     .class("macro-column");
 }
 
-fn build_clean(
+fn build_clean_repair_tab(
     cx: &mut Context,
     params: Arc<VoiceParams>,
     gui: Arc<dyn GuiContext>,
     meters: Arc<Meters>,
 ) {
-    VStack::new(cx, move |cx| {
-        Label::new(cx, "CLEAN & REPAIR")
-            .class("column-header")
-            .class("col-clean");
-
-        create_slider(
-            cx,
-            "Noise Reduction",
-            params.clone(),
-            gui.clone(),
-            ParamId::NoiseReduction,
-            |p| &p.noise_reduction,
-        );
-
-        create_slider(
-            cx,
-            "Tone",
-            params.clone(),
-            gui.clone(),
-            ParamId::NoiseTone,
-            |p| &p.noise_tone,
-        );
-
-        // Static Noise Learn/Remove Section
+    HStack::new(cx, move |cx| {
+        // Column 1: Static Cleanup
         VStack::new(cx, |cx| {
             create_slider(
                 cx,
-                "Static Noise",
+                "Rumble",
                 params.clone(),
                 gui.clone(),
-                ParamId::NoiseLearnAmount,
-                |p| &p.noise_learn_amount,
-            );
-            
-                        // Buttons and Meter Row
-                        HStack::new(cx, |cx| {
-                            let params_down = params.clone();
-                            let gui_down = gui.clone();
-                            let params_up = params.clone();
-                            let gui_up = gui.clone();
-                            
-                            // Custom momentary button using Element/HStack to ensure event capture works
-                            HStack::new(cx, |cx| {
-                                Label::new(cx, "Learn")
-                                    .hoverable(false); // Let parent handle events
-                            })
-                            .class("small-button")
-                            .on_mouse_down(move |cx, btn| {
-                                if btn == MouseButton::Left {
-                                    let s = ParamSetter::new(gui_down.as_ref());
-                                    s.begin_set_parameter(&params_down.noise_learn_trigger);
-                                    s.set_parameter(&params_down.noise_learn_trigger, true);
-                                    s.end_set_parameter(&params_down.noise_learn_trigger);
-                                    cx.capture(); // Critical for momentary behavior
-                                }
-                            })
-                            .on_mouse_up(move |cx, btn| {
-                                if btn == MouseButton::Left {
-                                    let s = ParamSetter::new(gui_up.as_ref());
-                                    s.begin_set_parameter(&params_up.noise_learn_trigger);
-                                    s.set_parameter(&params_up.noise_learn_trigger, false);
-                                    s.end_set_parameter(&params_up.noise_learn_trigger);
-                                    cx.release();
-                                }
-                            });
-                            
-                                            let params_clear_down = params.clone();
-                                            let gui_clear_down = gui.clone();
-                                            let params_clear_up = params.clone();
-                                            let gui_clear_up = gui.clone();
-                            
-                                            HStack::new(cx, |cx| {
-                                                Label::new(cx, "Clear").hoverable(false);
-                                            })
-                                            .class("small-button")
-                                            .on_mouse_down(move |cx, btn| {
-                                                if btn == MouseButton::Left {
-                                                    let s = ParamSetter::new(gui_clear_down.as_ref());
-                                                    s.begin_set_parameter(&params_clear_down.noise_learn_clear);
-                                                    s.set_parameter(&params_clear_down.noise_learn_clear, true);
-                                                    s.end_set_parameter(&params_clear_down.noise_learn_clear);
-                                                    cx.capture();
-                                                }
-                                            })
-                                            .on_mouse_up(move |cx, btn| {
-                                                if btn == MouseButton::Left {
-                                                    let s = ParamSetter::new(gui_clear_up.as_ref());
-                                                    s.begin_set_parameter(&params_clear_up.noise_learn_clear);
-                                                    s.set_parameter(&params_clear_up.noise_learn_clear, false);
-                                                    s.end_set_parameter(&params_clear_up.noise_learn_clear);
-                                                    cx.release();
-                                                }
-                                            });                            
-                            // Quality Meter
-                            VStack::new(cx, |cx| {
-                                Label::new(cx, "Profile").class("mini-label");
-                                NoiseLearnQualityMeter::new(cx, meters.clone())
-                                    .height(Pixels(8.0)) // Slightly taller for visibility
-                                    .width(Pixels(40.0));
-                            })
-                            .class("quality-meter-container");
-            
-                        }).class("noise-learn-controls");        }).class("group-container");
+                ParamId::RumbleAmount,
+                |p| &p.rumble_amount,
+            ).tooltip(|cx| { Label::new(cx, "Removes low-frequency rumble and vibration below the voice."); });
 
-        create_slider(
-            cx,
-            "De-Verb",
-            params.clone(),
-            gui.clone(),
-            ParamId::ReverbReduction,
-            |p| &p.reverb_reduction,
-        );
-        create_slider(
-            cx,
-            "Breath Control",
-            params.clone(),
-            gui.clone(),
-            ParamId::BreathControl,
-            |p| &p.breath_control,
-        );
+            create_slider(
+                cx,
+                "Hiss",
+                params.clone(),
+                gui.clone(),
+                ParamId::HissAmount,
+                |p| &p.hiss_amount,
+            ).tooltip(|cx| { Label::new(cx, "Reduces high-frequency hiss and air noise without affecting speech clarity."); });
+
+            // Static Noise Learn/Remove Section
+            VStack::new(cx, |cx| {
+                create_slider(
+                    cx,
+                    "Static Noise",
+                    params.clone(),
+                    gui.clone(),
+                    ParamId::NoiseLearnAmount,
+                    |p| &p.noise_learn_amount,
+                );
+
+                // Buttons and Meter Row
+                HStack::new(cx, |cx| {
+                    let params_down = params.clone();
+                    let gui_down = gui.clone();
+                    let params_up = params.clone();
+                    let gui_up = gui.clone();
+
+                    // Custom momentary button using Element/HStack to ensure event capture works
+                    HStack::new(cx, |cx| {
+                        Label::new(cx, "Learn").hoverable(false); // Let parent handle events
+                    })
+                    .class("small-button")
+                    .on_mouse_down(move |cx, btn| {
+                        if btn == MouseButton::Left {
+                            let s = ParamSetter::new(gui_down.as_ref());
+                            s.begin_set_parameter(&params_down.noise_learn_trigger);
+                            s.set_parameter(&params_down.noise_learn_trigger, true);
+                            s.end_set_parameter(&params_down.noise_learn_trigger);
+                            cx.capture(); // Critical for momentary behavior
+                        }
+                    })
+                    .on_mouse_up(move |cx, btn| {
+                        if btn == MouseButton::Left {
+                            let s = ParamSetter::new(gui_up.as_ref());
+                            s.begin_set_parameter(&params_up.noise_learn_trigger);
+                            s.set_parameter(&params_up.noise_learn_trigger, false);
+                            s.end_set_parameter(&params_up.noise_learn_trigger);
+                            cx.release();
+                        }
+                    });
+
+                    let params_clear_down = params.clone();
+                    let gui_clear_down = gui.clone();
+                    let params_clear_up = params.clone();
+                    let gui_clear_up = gui.clone();
+
+                    HStack::new(cx, |cx| {
+                        Label::new(cx, "Clear").hoverable(false);
+                    })
+                    .class("small-button")
+                    .on_mouse_down(move |cx, btn| {
+                        if btn == MouseButton::Left {
+                            let s = ParamSetter::new(gui_clear_down.as_ref());
+                            s.begin_set_parameter(&params_clear_down.noise_learn_clear);
+                            s.set_parameter(&params_clear_down.noise_learn_clear, true);
+                            s.end_set_parameter(&params_clear_down.noise_learn_clear);
+                            cx.capture();
+                        }
+                    })
+                    .on_mouse_up(move |cx, btn| {
+                        if btn == MouseButton::Left {
+                            let s = ParamSetter::new(gui_clear_up.as_ref());
+                            s.begin_set_parameter(&params_clear_up.noise_learn_clear);
+                            s.set_parameter(&params_clear_up.noise_learn_clear, false);
+                            s.end_set_parameter(&params_clear_up.noise_learn_clear);
+                            cx.release();
+                        }
+                    });
+
+                    // Quality Meter
+                    VStack::new(cx, |cx| {
+                        Label::new(cx, "Quality").class("mini-label");
+                        NoiseLearnQualityMeter::new(cx, meters.clone())
+                            .height(Pixels(8.0)) // Slightly taller for visibility
+                            .width(Pixels(40.0));
+                    })
+                    .class("quality-meter-container");
+                })
+                .class("noise-learn-controls");
+            })
+            .class("group-container");
+        }).class("tab-column");
+
+        // Column 2: Adaptive Cleanup
+        VStack::new(cx, |cx| {
+            create_slider(
+                cx,
+                "Noise Reduction",
+                params.clone(),
+                gui.clone(),
+                ParamId::NoiseReduction,
+                |p| &p.noise_reduction,
+            ).tooltip(|cx| { Label::new(cx, "Reduces steady background noise using adaptive hybrid suppression."); });
+
+            create_slider(
+                cx,
+                "De-Verb",
+                params.clone(),
+                gui.clone(),
+                ParamId::ReverbReduction,
+                |p| &p.reverb_reduction,
+            ).tooltip(|cx| { Label::new(cx, "Reduces room reflections and resonant coloration."); });
+
+            create_slider(
+                cx,
+                "Breath Control",
+                params.clone(),
+                gui.clone(),
+                ParamId::BreathControl,
+                |p| &p.breath_control,
+            ).tooltip(|cx| { Label::new(cx, "Automatically attenuates breaths and mouth noise between words."); });
+        }).class("tab-column");
     })
-    .class("clean-column");
+    .class("tab-content")
+    .class("tab-clean-repair");
 }
 
-fn build_polish(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
-    VStack::new(cx, move |cx| {
-        Label::new(cx, "POLISH & ENHANCE")
-            .class("column-header")
-            .class("col-polish");
-
-        create_slider(
-            cx,
-            "Proximity",
-            params.clone(),
-            gui.clone(),
-            ParamId::Proximity,
+fn build_shape_tab(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
+    HStack::new(cx, move |cx| {
+        VStack::new(cx, |cx| {
+            create_slider(
+                cx,
+                "Proximity",
+                params.clone(),
+                gui.clone(),
+                ParamId::Proximity,
             |p| &p.proximity,
-        );
-        create_slider(
-            cx,
-            "Clarity",
-            params.clone(),
-            gui.clone(),
-            ParamId::Clarity,
-            |p| &p.clarity,
-        );
-        create_slider(
-            cx,
-            "De-Ess",
-            params.clone(),
-            gui.clone(),
-            ParamId::DeEsser,
-            |p| &p.de_esser,
-        );
-        create_slider(
-            cx,
-            "Leveler",
-            params.clone(),
-            gui.clone(),
-            ParamId::Leveler,
-            |p| &p.leveler,
-        );
+            ).tooltip(|cx| { Label::new(cx, "Adjusts perceived microphone distance and vocal warmth."); });
 
-        Element::new(cx).class("fill-height");
+            Element::new(cx).height(Pixels(12.0)); // Spacing
 
+            create_slider(
+                cx,
+                "Clarity",
+                params.clone(),
+                gui.clone(),
+                ParamId::Clarity,
+                |p| &p.clarity,
+            ).tooltip(|cx| { Label::new(cx, "Reduces low-mid muddiness to improve speech definition."); });
+        }).class("tab-column");
+    })
+    .class("tab-content")
+    .class("tab-shape");
+}
+
+fn build_dynamics_tab(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
+    HStack::new(cx, move |cx| {
+        VStack::new(cx, |cx| {
+            create_slider(
+                cx,
+                "De-Ess",
+                params.clone(),
+                gui.clone(),
+                ParamId::DeEsser,
+                |p| &p.de_esser,
+            );
+
+            create_slider(
+                cx,
+                "Leveler",
+                params.clone(),
+                gui.clone(),
+                ParamId::Leveler,
+                |p| &p.leveler,
+            );
+
+            VStack::new(cx, |cx| {
+                Label::new(cx, "Limiter").class("slider-label");
+                Label::new(cx, "Automatic Safety").class("mini-label");
+            }).class("group-container");
+        }).class("tab-column");
+    })
+    .class("tab-content")
+    .class("tab-dynamics");
+}
+
+fn build_output(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
+    VStack::new(cx, move |cx| {
         Label::new(cx, "OUTPUT")
             .class("column-header")
             .class("output-accent");
@@ -1129,7 +1145,7 @@ fn build_polish(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
         );
         create_dropdown(cx, "FINAL OUTPUT", params.clone(), gui.clone());
     })
-    .class("polish-column");
+    .class("output-section");
 }
 
 fn build_header(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
@@ -1148,7 +1164,7 @@ fn build_header(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
 
         Binding::new(
             cx,
-            Data::params.map(|p| p.macro_mode.value()),
+            VoiceStudioData::params.map(|p| p.macro_mode.value()),
             move |cx, lens| {
                 let m = lens.get(cx);
 
@@ -1246,9 +1262,13 @@ fn build_footer(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
                     s.set_parameter(&params_reset.noise_reduction, 0.0);
                     s.end_set_parameter(&params_reset.noise_reduction);
 
-                    s.begin_set_parameter(&params_reset.noise_tone);
-                    s.set_parameter(&params_reset.noise_tone, 0.5);
-                    s.end_set_parameter(&params_reset.noise_tone);
+                    s.begin_set_parameter(&params_reset.rumble_amount);
+                    s.set_parameter(&params_reset.rumble_amount, 0.0);
+                    s.end_set_parameter(&params_reset.rumble_amount);
+
+                    s.begin_set_parameter(&params_reset.hiss_amount);
+                    s.set_parameter(&params_reset.hiss_amount, 0.0);
+                    s.end_set_parameter(&params_reset.hiss_amount);
                     
                     // Reset Static Noise Params
                     s.begin_set_parameter(&params_reset.noise_learn_amount);
@@ -1300,17 +1320,17 @@ fn build_footer(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
                     s.set_parameter(&params_reset.macro_mode, true);
                     s.end_set_parameter(&params_reset.macro_mode);
 
-                    s.begin_set_parameter(&params_reset.macro_distance);
-                    s.set_parameter(&params_reset.macro_distance, 0.0);
-                    s.end_set_parameter(&params_reset.macro_distance);
+                    s.begin_set_parameter(&params_reset.macro_clean);
+                    s.set_parameter(&params_reset.macro_clean, 0.0);
+                    s.end_set_parameter(&params_reset.macro_clean);
 
-                    s.begin_set_parameter(&params_reset.macro_clarity);
-                    s.set_parameter(&params_reset.macro_clarity, 0.0);
-                    s.end_set_parameter(&params_reset.macro_clarity);
+                    s.begin_set_parameter(&params_reset.macro_enhance);
+                    s.set_parameter(&params_reset.macro_enhance, 0.0);
+                    s.end_set_parameter(&params_reset.macro_enhance);
 
-                    s.begin_set_parameter(&params_reset.macro_consistency);
-                    s.set_parameter(&params_reset.macro_consistency, 0.0);
-                    s.end_set_parameter(&params_reset.macro_consistency);
+                    s.begin_set_parameter(&params_reset.macro_control);
+                    s.set_parameter(&params_reset.macro_control, 0.0);
+                    s.end_set_parameter(&params_reset.macro_control);
 
                     s.begin_set_parameter(&params_reset.final_output_preset);
                     s.set_parameter(&params_reset.final_output_preset, OutputPreset::None);
@@ -1420,8 +1440,9 @@ pub fn build_ui(
         Arc::new(Mutex::new(css_path))
     };
 
-    Data {
+    VoiceStudioData {
         params: params.clone(),
+        advanced_tab: AdvancedTab::CleanRepair,
         #[cfg(feature = "debug")]
         css_temp_path,
     }
@@ -1443,7 +1464,7 @@ pub fn build_ui(
 
         Binding::new(
             cx,
-            Data::params.map(|p| p.macro_mode.value()),
+            VoiceStudioData::params.map(|p| p.macro_mode.value()),
             move |cx, lens| {
                 let simple = lens.get(cx);
 
@@ -1457,15 +1478,52 @@ pub fn build_ui(
 
                     let p = params_local.clone();
                     let g = gui_local.clone();
+                    let m = meters_local.clone();
 
-                    HStack::new(cx, move |cx| {
+                    VStack::new(cx, move |cx| {
                         if simple {
                             build_macro(cx, p.clone(), g.clone());
                             Element::new(cx).class("fill-width");
                         } else {
-                            build_clean(cx, p.clone(), g.clone(), meters_local.clone());
-                            build_polish(cx, p.clone(), g.clone());
+                            // Tab Headers
+                            let p_tabs = p.clone();
+                            let g_tabs = gui_local.clone();
+                            let m_tabs = m.clone();
+
+                            HStack::new(cx, move |cx| {
+                                Binding::new(cx, VoiceStudioData::advanced_tab, move |cx, tab_lens| {
+                                    let current_tab = tab_lens.get(cx);
+                                    
+                                    // Clean & Repair Tab
+                                    Button::new(cx, |ex| ex.emit(AdvancedTabEvent::SetTab(AdvancedTab::CleanRepair)), 
+                                        |cx| Label::new(cx, "Clean & Repair"))
+                                        .class(if current_tab == AdvancedTab::CleanRepair { "tab-header-active" } else { "tab-header" });
+                                        
+                                    // Shape Tab
+                                    Button::new(cx, |ex| ex.emit(AdvancedTabEvent::SetTab(AdvancedTab::Shape)), 
+                                        |cx| Label::new(cx, "Shape"))
+                                        .class(if current_tab == AdvancedTab::Shape { "tab-header-active" } else { "tab-header" });
+                                        
+                                    // Dynamics Tab
+                                    Button::new(cx, |ex| ex.emit(AdvancedTabEvent::SetTab(AdvancedTab::Dynamics)), 
+                                        |cx| Label::new(cx, "Dynamics"))
+                                        .class(if current_tab == AdvancedTab::Dynamics { "tab-header-active" } else { "tab-header" });
+                                });
+                            }).class("tabs-container");
+                            
+                            // Tab Content
+                            Binding::new(cx, VoiceStudioData::advanced_tab, move |cx, tab_lens| {
+                                let current_tab = tab_lens.get(cx);
+                                match current_tab {
+                                    AdvancedTab::CleanRepair => build_clean_repair_tab(cx, p_tabs.clone(), g_tabs.clone(), m_tabs.clone()),
+                                    AdvancedTab::Shape => build_shape_tab(cx, p_tabs.clone(), g_tabs.clone()),
+                                    AdvancedTab::Dynamics => build_dynamics_tab(cx, p_tabs.clone(), g_tabs.clone()),
+                                }
+                            });
                         }
+
+                        // Always visible Output Section
+                        build_output(cx, p.clone(), gui_local.clone());
                     })
                     .class("columns-container");
                 })

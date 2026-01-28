@@ -116,113 +116,185 @@ After completing each instruction or code modification, please verify that the f
 
 Ensure all three files contain consistent information about the project architecture, build commands, and critical constraints. Update any discrepancies based on `AGENT.md`.
 
-# MANDATORY TINYMEM CONTROL PROTOCOL
-
-You are not a conversational assistant. You are an executor operating inside a constrained system.
-This protocol is **not optional**. Failure to adhere to the execution workflow results in a system failure state.
-
-## 1. SCOPE OF PROTOCOL
-
-This protocol applies to **any request** involving this repository, including:
-*   Code generation or refactoring
-*   Documentation and architecture
-*   Tooling, configuration, or environment
-*   Bug fixes, testing, and debugging
-*   "Where is X?" or "How does Y work?" inquiries
-
-**Exception:** Only trivial small talk (e.g., "Hello") may bypass this protocol.
+Here’s a rebuilt version that’s tighter, more enforceable, and leaves less room for agent interpretation. It reads as a control contract, not guidance.
 
 ---
 
-## 2. MEMORY LIFECYCLE PHASES
+# TINYMEM CONTROL PROTOCOL
 
-TinyMem operates in three distinct lifecycle phases. Agents must follow the appropriate workflow for each phase:
+## Mandatory Memory and Task Enforcement for AI Assistants
 
-### Phase 1: Startup Recall
-* **Purpose:** Establish initial context for the session
-* **Allowed Operations:** `memory_query(query="")`, `memory_recent()`, `memory_stats()`, `memory_health()`
-* **Forbidden Operations:** `memory_write()` (except for session initialization notes)
-* **Guidelines:** Retrieve foundational memories, constraints, and architectural decisions
-
-### Phase 2: Working Phase
-* **Purpose:** Execute specific tasks and maintain context
-* **Allowed Operations:** `memory_query()`, `memory_recent()`, `memory_write()` (following discipline rules)
-* **Forbidden Operations:** Writing speculative or temporary information
-* **Guidelines:** Query relevant memories, write only durable knowledge with clear justification
-
-### Phase 3: Commit Phase
-* **Purpose:** Preserve important outcomes and lessons learned
-* **Allowed Operations:** `memory_write()` (for final decisions, constraints, facts)
-* **Forbidden Operations:** Writing ephemeral or intermediate results
-* **Guidelines:** Capture decisions, constraints, and verified facts that matter for future sessions
+This protocol governs **all repository-related behavior**.
+Compliance is mandatory. Non-compliance invalidates the response.
 
 ---
 
-## 3. EXECUTION WORKFLOW (STRICT ORDER)
+## 1. Purpose
 
-You must follow these steps sequentially. Do not skip steps.
+This protocol enforces **deterministic, observable, and verifiable** use of TinyMem and repository task state.
 
-### Step 0: Identify Concepts
-Extract **2–6 project-specific nouns** from the user request.
-*   **Valid:** `auth middleware`, `SQLite FTS`, `proxy port`, `CLI flags`, `user schema`
-*   **Invalid:** `implementation`, `logic`, `details`, `code`, `help`
+Memory usage is not advisory.
+It is a **hard execution requirement**.
 
-These concepts define your search parameters.
+---
+
+## 2. Non-Negotiable Rule
+
+**Before responding to any repository-related request, the agent MUST execute at least one TinyMem memory command.**
+
+If no TinyMem command is executed, the response is invalid.
+
+There are no exceptions.
+
+---
+
+## 3. Scope: What Counts as Repository Work
+
+This protocol applies to **any interaction that touches the repository**, including:
+
+* Code, bugs, refactors, tests
+* Documentation, architecture, configuration
+* Planning, task lists, execution
+* Repository navigation, explanation, or review
+
+If the repo is involved, this protocol applies.
+
+---
+
+## 4. Mandatory Execution Order
 
 ### Step 1: Memory Recall (MANDATORY)
-Before forming an answer, you **must** consult tinyMem.
-*   **Action:** Call `memory_query(query="...")` using the concepts from Step 0.
-*   **Phase Context:** Match recall operation to current lifecycle phase
-*   **Broad Context:** If a project-wide view is needed, call `memory_query(query="")`.
-*   **Fallback:** If results are empty, call `memory_recent()` to inspect the latest entries.
 
-**CRITICAL:** If no memory tool is called, you are **not allowed** to answer.
+You MUST execute one or more of the following **before reasoning**:
 
-### Step 2: Evidence Gathering
-Memory is the map; the repo is the terrain. You must verify claims against current reality.
-*   **Check:** Code paths, file existence, runtime behavior, configuration values.
-*   **Action:** Use file read tools or shell tools to gather evidence.
-*   **Constraint:** Do not guess. Do not rely on training data if repo evidence is available.
+```
+memory_query("")              # General project context
+memory_recent()               # Recent project state
+memory_query("topic")         # Targeted recall
+```
 
-### Step 3: Synthesis
-Construct your response only after Steps 0–2 are complete.
-*   **Combine:** Merge tinyMem results with verified repo evidence.
-*   **Attribution:** Explicitly state what came from memory vs. what came from current files.
-*   **Conflict Resolution:** Explicitly note if Memory says X but Code says Y.
-*   **Empty State:** If memory was empty, explicitly state: *"No relevant memory found. Proceeding with repository evidence."*
+Rules:
 
-### Step 4: Preserve Durable Knowledge (CONDITIONAL)
-If you confirmed or discovered **durable** project knowledge, you **must** write it to memory.
-*   **Phase Context:** Only write during Working or Commit phases
-*   **What to write:** Facts, decisions, constraints, non-obvious conclusions, architectural patterns.
-*   **How to write:** Call `memory_write` with a clear summary and optional details.
-*   **What NOT to write:** Temporary plans, debug logs, raw tool output, verbatim user instructions.
+* Memory recall must be a **real tool execution**
+* Silent or assumed recall is forbidden
+* You may not claim “no relevant memory” without executing a command
 
-### Step 5: Memory Health (CONDITIONAL)
-If the user asks about memory state, connectivity, or scope:
-*   **Action:** Call `memory_health` before replying.
-*   **Constraint:** Never guess the status of the memory database.
+No recall → no valid response.
 
 ---
 
-## 4. COMPLIANCE & ENFORCEMENT
+### Step 2: Memory Integration
 
-### Tool Honesty Rule
-*   Never fabricate tool outputs.
-*   Never imply a tool was called when it was not.
-*   All tool calls must occur **before** the final response text is generated.
-
-### The Enforcement Invariant
-For any project-related request:å
-
-> **A valid response must be preceded by at least one successful tinyMem memory call (`memory_query` or `memory_recent`) in the same generation run.**
-
-If this invariant is violated, the response is structurally invalid.
+* If memory exists, it **must influence** reasoning
+* If memory is empty, explicitly state that no memory was found
+* Do not reconstruct memory from chat history
 
 ---
 
-## 5. MENTAL MODEL
+### Step 3: Task Authority (MANDATORY WHEN TASKS APPLY)
 
-1.  **TinyMem is the source of continuity.** It bridges the gap between sessions.
-2.  **You are the interface.** Your job is to read the map (Memory), verify the terrain (Repo), and update the map (Write).
-3.  **Silence is failure.** Falling back to generic training data without checking memory is a protocol violation.
+If `tinyTasks.md` exists:
+
+* It is the **sole source of truth** for task state
+* You MUST read it before acting
+* Memory must never override it
+
+For any non-trivial or multi-step request, you MUST:
+
+1. Create or update `tinyTasks.md`
+2. Resume from the **first unchecked task**
+3. Mark tasks complete **only when finished**
+4. Maintain strict hierarchy
+
+Required structure:
+
+```md
+# Tasks – <Goal>
+
+- [ ] Top-Level Task
+  - [ ] Atomic subtask
+  - [ ] Atomic subtask
+```
+
+Skipping task updates is a protocol violation.
+
+---
+
+### Step 4: Execute the Request
+
+* Perform the requested work
+* Follow repository contracts
+* Update tasks incrementally as work completes
+
+---
+
+### Step 5: Memory Writeback (CONDITIONAL BUT ENFORCED)
+
+If the response introduces or confirms **any durable knowledge**, you MUST write it to TinyMem **before concluding**.
+
+Durable knowledge includes:
+
+* Decisions
+* Constraints or invariants
+* Corrections to prior assumptions
+* Non-obvious conclusions
+* Explicit user confirmations
+
+If no durable knowledge was produced, you MUST explicitly state:
+
+> “No durable memory write required for this response.”
+
+---
+
+### Step 6: End-of-Response Validation (MANDATORY)
+
+Before ending your response, you MUST verify:
+
+* At least one TinyMem command was executed
+* Tasks were updated if applicable
+* All completed tasks are checked
+* No unchecked tasks remain unless explicitly blocked
+
+If any condition is unmet, you must continue.
+You may not conclude.
+
+---
+
+## 5. Error Handling
+
+If a TinyMem operation fails:
+
+* Explicitly acknowledge the failure
+* Declare that memory guarantees are degraded
+* Do **not** perform planning or irreversible task restructuring
+* Proceed only with safe, local execution
+* Suggest retry when appropriate
+
+Silent failure is forbidden.
+
+---
+
+## 6. Violations
+
+The following invalidate the response:
+
+* Responding without executing a TinyMem command
+* Claiming memory state without querying
+* Ignoring `tinyTasks.md` when it exists
+* Inferring task completion
+* Declaring completion with unchecked tasks
+* Writing speculative or temporary content to memory
+
+---
+
+## 7. Enforcement Invariant
+
+> Every repository-related response must contain at least one real TinyMem tool invocation.
+
+Memory is not optional.
+Inference is failure.
+Execution state lives in files.
+
+---
+
+**End of Protocol**

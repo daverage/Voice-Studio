@@ -16,13 +16,15 @@ Voice Studio is built around a tightly integrated DSP restoration pipeline that 
 
 1. **Hygiene**: 90Hz High-Pass Filter (`SpeechHpf`)
 2. **Analysis**: Speech Confidence Sidechain
-3. **Early Reflection**: Micro-deverb for desk/wall coloration
-4. **Denoiser**: Hybrid Spectral + Neural suppression
-5. **Plosive Softener**: Automatic thump protection
-6. **Breath Reducer**: Confidence-weighted breath softening
-7. **Deverber**: Late reverb tail reduction
-8. **Shaping**: Proximity (body) and Clarity (air)
-9. **Dynamics**: De-esser, Leveler, and Limiter
+3. **Static Noise Removal**: Spectral subtraction of learned stationary noise (`NoiseLearnRemove`)
+4. **Hiss/Rumble Cleanup**: Dedicated HPF and HF Shelf (`HissRumble`)
+5. **Early Reflection**: Micro-deverb for desk/wall coloration
+6. **Denoiser**: Hybrid Spectral + Neural suppression
+7. **Plosive Softener**: Automatic thump protection
+8. **Breath Reducer**: Confidence-weighted breath softening
+9. **Deverber**: Late reverb tail reduction
+10. **Shaping**: Proximity (body) and Clarity (air)
+11. **Dynamics**: De-esser, Leveler, and Limiter
 
 ## Features
 
@@ -30,6 +32,22 @@ Voice Studio is built around a tightly integrated DSP restoration pipeline that 
 - **Advanced Mode**: Granular access to every stage of the restoration and dynamics chain.
 - **Global Reset**: Instantly clear all DSP state and return to defaults.
 - **Delivery Presets**: Built-in loudness targeting for YouTube, Spotify, and Broadcast standards.
+
+## Controls
+
+### Clean & Repair
+*   **Noise Reduction**: Reduces steady background noise.
+*   **Rumble**: Cuts low-frequency mechanical noise (20–120 Hz).
+*   **Hiss**: Cuts high-frequency broadband noise (>8 kHz).
+*   **Static Noise**: Learns and removes stationary noise (room tone) even during silence.
+*   **De-Verb**: Reduces room reflections.
+*   **Breath Control**: Attenuates breaths.
+
+### Polish & Enhance
+*   **Proximity**: Restores body/warmth (120–300 Hz).
+*   **Clarity**: Removes low-mid mud (180–400 Hz).
+*   **De-Ess**: Controls sibilance.
+*   **Leveler**: Smooths loudness.
 
 ## Building
 

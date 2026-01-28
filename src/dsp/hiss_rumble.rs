@@ -3,8 +3,8 @@
 //! Dedicated broadband cleanup that does NOT rely on denoiser speech gating.
 //! This module performs real, measurable noise removal:
 //!
-//! - RUMBLE: raises a high-pass filter cutoff
-//! - HISS: applies a high-frequency shelf cut, relaxed during speech
+//! - RUMBLE: raises a high-pass filter cutoff (20Hz - 120Hz)
+//! - HISS: applies a high-frequency shelf cut (8kHz, up to -24dB), relaxed during speech
 //!
 //! This guarantees hiss/rumble reduction even during silence.
 
@@ -16,7 +16,7 @@ use crate::dsp::speech_confidence::SpeechSidechain;
 // -----------------------------
 
 const RUMBLE_MIN_HZ: f32 = 20.0;
-const RUMBLE_MAX_HZ: f32 = 70.0; // or 60.0
+const RUMBLE_MAX_HZ: f32 = 120.0; 
 
 const HISS_SHELF_HZ: f32 = 8000.0;
 const HISS_MAX_CUT_DB: f32 = -24.0;
@@ -73,31 +73,21 @@ impl HissRumble {
         &mut self,
         input_l: f32,
         input_r: f32,
-        tone: f32,
+        rumble_amt: f32,
+        hiss_amt: f32,
         sidechain: &SpeechSidechain,
     ) -> (f32, f32) {
-        // -----------------------------
-        // Bipolar mapping
-        // -----------------------------
-        // tone: 0.0 = max rumble removal
-        // tone: 0.5 = neutral
-        // tone: 1.0 = max hiss removal
-        let t = (tone.clamp(0.0, 1.0) - 0.5) * 2.0; // -1 .. +1
-
-        let rumble_amt = (-t).max(0.0); // 0..1
-        let hiss_amt = (t).max(0.0); // 0..1
-
         // -----------------------------
         // Targets
         // -----------------------------
 
-        // Rumble = raise HPF cutoff
-        self.rumble_hz_target = RUMBLE_MIN_HZ + (RUMBLE_MAX_HZ - RUMBLE_MIN_HZ) * rumble_amt;
+        // Rumble = raise HPF cutoff (20Hz -> 120Hz)
+        self.rumble_hz_target = RUMBLE_MIN_HZ + (RUMBLE_MAX_HZ - RUMBLE_MIN_HZ) * rumble_amt.clamp(0.0, 1.0);
 
-        // Hiss = HF shelf cut
+        // Hiss = HF shelf cut (0 -> -24dB)
         // Relax during speech to protect sibilance
         let speech_relax = (1.0 - sidechain.speech_conf).clamp(0.0, 1.0);
-        self.hiss_db_target = HISS_MAX_CUT_DB * hiss_amt * speech_relax;
+        self.hiss_db_target = HISS_MAX_CUT_DB * hiss_amt.clamp(0.0, 1.0) * speech_relax;
 
         // -----------------------------
         // Smooth parameters

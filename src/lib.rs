@@ -221,8 +221,11 @@ pub struct VoiceParams {
     #[id = "noise_reduction"]
     pub noise_reduction: FloatParam,
 
-    #[id = "noise_tone"]
-    pub noise_tone: FloatParam,
+    #[id = "rumble_amount"]
+    pub rumble_amount: FloatParam,
+
+    #[id = "hiss_amount"]
+    pub hiss_amount: FloatParam,
 
     #[id = "noise_learn_amount"]
     pub noise_learn_amount: FloatParam,
@@ -263,14 +266,14 @@ pub struct VoiceParams {
     #[id = "macro_mode"]
     pub macro_mode: BoolParam,
 
-    #[id = "macro_distance"]
-    pub macro_distance: FloatParam,
+    #[id = "macro_clean"]
+    pub macro_clean: FloatParam,
 
-    #[id = "macro_clarity"]
-    pub macro_clarity: FloatParam,
+    #[id = "macro_enhance"]
+    pub macro_enhance: FloatParam,
 
-    #[id = "macro_consistency"]
-    pub macro_consistency: FloatParam,
+    #[id = "macro_control"]
+    pub macro_control: FloatParam,
 
     /// Trigger a full plugin reset (internal buffers and state)
     #[id = "reset_all"]
@@ -297,18 +300,6 @@ fn format_percent(v: f32) -> String {
 // Helper to format gain in dB
 fn format_db(v: f32) -> String {
     format!("{:.1} dB", v)
-}
-
-// Helper to format tone parameter (Rumble <-> Hiss)
-fn format_tone(v: f32) -> String {
-    let signed = ((v - 0.5) * 200.0).clamp(-100.0, 100.0);
-    if signed < -0.5 {
-        format!("Rumble ({:.0})", signed)
-    } else if signed > 0.5 {
-        format!("Hiss (+{:.0})", signed)
-    } else {
-        "Neutral (0)".to_string()
-    }
 }
 
 // -----------------------------------------------------------------------------
@@ -415,12 +406,20 @@ impl Default for VoiceStudioPlugin {
                 .with_value_to_string(Arc::new(format_percent))
                 .with_smoother(SmoothingStyle::Linear(50.0)),
 
-                noise_tone: FloatParam::new(
-                    "Hiss / Rumble",
-                    0.5,
+                rumble_amount: FloatParam::new(
+                    "Rumble",
+                    0.0,
                     FloatRange::Linear { min: 0.0, max: 1.0 },
                 )
-                .with_value_to_string(Arc::new(format_tone))
+                .with_value_to_string(Arc::new(format_percent))
+                .with_smoother(SmoothingStyle::Linear(50.0)),
+
+                hiss_amount: FloatParam::new(
+                    "Hiss",
+                    0.0,
+                    FloatRange::Linear { min: 0.0, max: 1.0 },
+                )
+                .with_value_to_string(Arc::new(format_percent))
                 .with_smoother(SmoothingStyle::Linear(50.0)),
 
                 noise_learn_amount: FloatParam::new(
@@ -496,22 +495,22 @@ impl Default for VoiceStudioPlugin {
 
                 // Macro controls
                 macro_mode: BoolParam::new("Easy Mode", true), // Start in Simple mode
-                macro_distance: FloatParam::new(
-                    "Distance",
+                macro_clean: FloatParam::new(
+                    "Clean",
                     0.0,
                     FloatRange::Linear { min: 0.0, max: 1.0 },
                 )
                 .with_value_to_string(Arc::new(format_percent))
                 .with_smoother(SmoothingStyle::Linear(50.0)),
-                macro_clarity: FloatParam::new(
-                    "Clarity",
+                macro_enhance: FloatParam::new(
+                    "Enhance",
                     0.0,
                     FloatRange::Linear { min: 0.0, max: 1.0 },
                 )
                 .with_value_to_string(Arc::new(format_percent))
                 .with_smoother(SmoothingStyle::Linear(50.0)),
-                macro_consistency: FloatParam::new(
-                    "Consistency",
+                macro_control: FloatParam::new(
+                    "Control",
                     0.0,
                     FloatRange::Linear { min: 0.0, max: 1.0 },
                 )
@@ -862,9 +861,10 @@ impl VoiceStudioPlugin {
             proximity: self.params.proximity.value(),
             clarity: self.params.clarity.value(),
             de_esser: self.params.de_esser.value(),
-            noise_tone: self.params.noise_tone.value(),
             leveler: self.params.leveler.value(),
             breath_control: self.params.breath_control.value(),
+            rumble: self.params.rumble_amount.value(),
+            hiss: self.params.hiss_amount.value(),
         };
 
         let mut macro_blend = if macro_mode { 1.0 } else { 0.0 };
@@ -888,7 +888,10 @@ impl VoiceStudioPlugin {
             macro_targets.noise_reduction,
         ) * MAX_GAIN)
             .clamp(0.0, MAX_GAIN);
-        let noise_tone = blend(advanced_targets.noise_tone, macro_targets.noise_tone);
+        
+        let rumble_val = blend(self.params.rumble_amount.value(), macro_targets.rumble);
+        let hiss_val = blend(self.params.hiss_amount.value(), macro_targets.hiss);
+
         let raw_reverb = (blend(
             advanced_targets.reverb_reduction,
             macro_targets.reverb_reduction,
@@ -994,9 +997,10 @@ impl VoiceStudioPlugin {
         self.meters
             .breath_reduction_resolved
             .store(breath_amt, Ordering::Relaxed);
+        // noise_tone_resolved deprecated
         self.meters
             .noise_tone_resolved
-            .store(noise_tone, Ordering::Relaxed);
+            .store(0.0, Ordering::Relaxed);
 
         // --- NEW: Loudness Compensation Logic ---
         // Target preservation of pre-processing RMS within ±2 dB (Always on)
@@ -1020,7 +1024,7 @@ impl VoiceStudioPlugin {
         let denoise_cfg = DenoiseConfig {
             amount: noise_amt,
             sensitivity: (0.2 + 0.8 * noise_amt).clamp(0.2, 1.0),
-            tone: noise_tone,
+            tone: 0.5, // Neutral, cleanup handled by HissRumble
             sample_rate: self.sample_rate,
             speech_confidence: 0.5, // Will be updated per-sample with actual sidechain value
         };
@@ -1085,7 +1089,7 @@ impl VoiceStudioPlugin {
             // Uses NLR output as base
             let (hr_l, hr_r) = self
                 .hiss_rumble
-                .process(nlr_l, nlr_r, noise_tone, &sidechain);
+                .process(nlr_l, nlr_r, rumble_val, hiss_val, &sidechain);
 
             // Track pre-processed speech band energy - Removed unused calculation
 
@@ -1147,8 +1151,11 @@ impl VoiceStudioPlugin {
                 // Update config with per-sample speech confidence
                 let mut cfg = denoise_cfg;
                 cfg.speech_confidence = sidechain.speech_conf;
+                // Denoiser tone is now just 0.5 (neutral) as Hiss/Rumble handles bias
+                cfg.tone = 0.5; 
                 self.denoiser.process_sample(bias_l, bias_r, &cfg)
             };
+
 
             // 4. PLOSIVE SOFTENER (after denoise, before breath)
             let s1b_l = self.plosive_softener_l.process(s1_l);

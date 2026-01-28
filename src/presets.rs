@@ -54,7 +54,6 @@ impl DspPreset {
         match self {
             DspPreset::Manual => None,
             DspPreset::PodcastNoisy => Some(DspPresetValues {
-                // Based on optimization trial 0 (score: 0.5908, STOI: 96.7%)
                 noise_reduction: 0.35,
                 reverb_reduction: 0.60,
                 proximity: 0.05,
@@ -62,9 +61,11 @@ impl DspPreset {
                 de_esser: 0.0,
                 leveler: 0.70,
                 breath_control: 0.30,
+                macro_clean: 0.60,
+                macro_enhance: 0.55,
+                macro_control: 0.45,
             }),
             DspPreset::VoiceoverStudio => Some(DspPresetValues {
-                // Lighter settings for studio - minimal noise, natural proximity
                 noise_reduction: 0.20,
                 reverb_reduction: 0.40,
                 proximity: 0.10,
@@ -72,9 +73,11 @@ impl DspPreset {
                 de_esser: 0.15,
                 leveler: 0.60,
                 breath_control: 0.25,
+                macro_clean: 0.85,
+                macro_enhance: 0.75,
+                macro_control: 0.80,
             }),
             DspPreset::InterviewOutdoor => Some(DspPresetValues {
-                // Aggressive cleanup for outdoor/field recordings
                 noise_reduction: 0.55,
                 reverb_reduction: 0.75,
                 proximity: 0.0,
@@ -82,9 +85,11 @@ impl DspPreset {
                 de_esser: 0.10,
                 leveler: 0.75,
                 breath_control: 0.40,
+                macro_clean: 0.90,
+                macro_enhance: 0.40,
+                macro_control: 0.60,
             }),
             DspPreset::BroadcastClean => Some(DspPresetValues {
-                // Minimal processing for already-good audio
                 noise_reduction: 0.10,
                 reverb_reduction: 0.25,
                 proximity: 0.15,
@@ -92,6 +97,9 @@ impl DspPreset {
                 de_esser: 0.20,
                 leveler: 0.50,
                 breath_control: 0.15,
+                macro_clean: 0.35,
+                macro_enhance: 0.25,
+                macro_control: 0.20,
             }),
         }
     }
@@ -113,6 +121,9 @@ pub struct DspPresetValues {
     pub de_esser: f32,
     pub leveler: f32,
     pub breath_control: f32,
+    pub macro_clean: f32,
+    pub macro_enhance: f32,
+    pub macro_control: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Enum)]
