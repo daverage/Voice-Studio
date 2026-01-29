@@ -20,6 +20,9 @@ pub enum DspPreset {
     #[serde(rename = "Voiceover (Studio)")]
     #[name = "Voiceover (Studio)"]
     VoiceoverStudio,
+    #[serde(rename = "Mud Free")]
+    #[name = "Mud Free"]
+    MudFree,
     #[serde(rename = "Interview (Outdoor)")]
     #[name = "Interview (Outdoor)"]
     InterviewOutdoor,
@@ -34,6 +37,7 @@ impl DspPreset {
             DspPreset::Manual => "Manual",
             DspPreset::PodcastNoisy => "Podcast (Noisy Room)",
             DspPreset::VoiceoverStudio => "Voiceover (Studio)",
+            DspPreset::MudFree => "Mud Free",
             DspPreset::InterviewOutdoor => "Interview (Outdoor)",
             DspPreset::BroadcastClean => "Broadcast (Clean)",
         }
@@ -44,6 +48,8 @@ impl DspPreset {
             DspPreset::Manual => "Custom settings - no preset applied",
             DspPreset::PodcastNoisy => "Optimized for podcasts recorded in noisy environments",
             DspPreset::VoiceoverStudio => "Balanced settings for studio voiceover work",
+            DspPreset::MudFree =>
+                "Reduces low-mid muddiness while preserving body and natural presence",
             DspPreset::InterviewOutdoor => "Aggressive cleanup for outdoor/field recordings",
             DspPreset::BroadcastClean => "Minimal processing for professional broadcast audio",
         }
@@ -77,6 +83,34 @@ impl DspPreset {
                 macro_enhance: 0.75,
                 macro_control: 0.80,
             }),
+            DspPreset::MudFree => Some(DspPresetValues {
+                // Keep noise handling minimal
+                noise_reduction: 0.10,
+
+                // Very light reverb shaping only
+                reverb_reduction: 0.20,
+
+                // Prevent chest bloom that reintroduces 300 Hz mud
+                proximity: 0.20,
+
+                // Primary control — matches 300–800 Hz subtraction
+                clarity: 0.60,
+
+                // Only safety-level sibilance control
+                de_esser: 0.15,
+
+                // Gentle stabilization, not loudness chasing
+                leveler: 0.55,
+
+                // Light breath control to avoid exaggeration after clarity
+                breath_control: 0.20,
+
+                // Macro intent: clean-first, not enhance-first
+                macro_clean: 0.65,
+                macro_enhance: 0.40,
+                macro_control: 0.50,
+            }),
+
             DspPreset::InterviewOutdoor => Some(DspPresetValues {
                 noise_reduction: 0.55,
                 reverb_reduction: 0.75,

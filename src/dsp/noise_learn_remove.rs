@@ -205,7 +205,8 @@ struct NoiseLearnRemoveDetector {
     quality_alpha: f32,
 
     win_size: usize,
-    #[allow(dead_code)] // Keep for struct completeness, even if currently unused logic relies on it implicitly
+    #[allow(dead_code)]
+    // Keep for struct completeness, even if currently unused logic relies on it implicitly
     hop_size: usize,
     sample_rate: f32,
 }

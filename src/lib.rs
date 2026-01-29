@@ -4,12 +4,13 @@ mod macro_controller;
 mod meters;
 mod presets;
 mod ui;
+mod version;
 
 use crate::dsp::{
     Biquad, BreathReducer, ChannelProcessor, ClarityDetector, DeEsserDetector, DenoiseConfig,
-    EarlyReflectionSuppressor, HissRumble, LinkedCompressor, LinkedLimiter, PinkRefBias,
-    PlosiveSoftener, ProfileAnalyzer, SpectralGuardrails, SpeechConfidenceEstimator,
-    SpeechExpander, SpeechHpf, StereoStreamingDenoiser, NoiseLearnRemove, NoiseLearnRemoveConfig,
+    EarlyReflectionSuppressor, HissRumble, LinkedCompressor, LinkedLimiter, NoiseLearnRemove,
+    NoiseLearnRemoveConfig, PinkRefBias, PlosiveSoftener, ProfileAnalyzer, SpectralGuardrails,
+    SpeechConfidenceEstimator, SpeechExpander, SpeechHpf, StereoStreamingDenoiser,
 };
 use crate::macro_controller::{compute_simple_macro_targets, SimpleMacroTargets};
 use crate::meters::Meters;
@@ -430,11 +431,9 @@ impl Default for VoiceStudioPlugin {
                 .with_smoother(SmoothingStyle::Linear(100.0))
                 .with_value_to_string(Arc::new(format_percent)),
 
-                noise_learn_trigger: BoolParam::new("Learn Noise", false)
-                    .non_automatable(),
+                noise_learn_trigger: BoolParam::new("Learn Noise", false).non_automatable(),
 
-                noise_learn_clear: BoolParam::new("Clear Noise", false)
-                    .non_automatable(),
+                noise_learn_clear: BoolParam::new("Clear Noise", false).non_automatable(),
 
                 reverb_reduction: FloatParam::new(
                     "De-Verb (Room)",
@@ -888,7 +887,7 @@ impl VoiceStudioPlugin {
             macro_targets.noise_reduction,
         ) * MAX_GAIN)
             .clamp(0.0, MAX_GAIN);
-        
+
         let rumble_val = blend(self.params.rumble_amount.value(), macro_targets.rumble);
         let hiss_val = blend(self.params.hiss_amount.value(), macro_targets.hiss);
 
@@ -1072,7 +1071,9 @@ impl VoiceStudioPlugin {
                 learn: self.params.noise_learn_trigger.value(),
                 clear: self.params.noise_learn_clear.value(),
             };
-            let (nlr_l, nlr_r) = self.noise_learn_remove.process(hpf_l, hpf_r, nlr_cfg, &sidechain);
+            let (nlr_l, nlr_r) = self
+                .noise_learn_remove
+                .process(hpf_l, hpf_r, nlr_cfg, &sidechain);
 
             // 0b. ENVELOPE TRACKING (Unified Source of Truth)
             // Tracks dynamics after static noise removal for better expander/gate behavior
@@ -1152,10 +1153,9 @@ impl VoiceStudioPlugin {
                 let mut cfg = denoise_cfg;
                 cfg.speech_confidence = sidechain.speech_conf;
                 // Denoiser tone is now just 0.5 (neutral) as Hiss/Rumble handles bias
-                cfg.tone = 0.5; 
+                cfg.tone = 0.5;
                 self.denoiser.process_sample(bias_l, bias_r, &cfg)
             };
-
 
             // 4. PLOSIVE SOFTENER (after denoise, before breath)
             let s1b_l = self.plosive_softener_l.process(s1_l);
@@ -1584,7 +1584,8 @@ impl VoiceStudioPlugin {
         self.meters.set_gain_reduction_r(gr_db);
 
         // Update Quality Meter
-        self.meters.set_noise_learn_quality(self.noise_learn_remove.get_quality());
+        self.meters
+            .set_noise_learn_quality(self.noise_learn_remove.get_quality());
 
         // =====================================================================
         // DEBUG METERS - for DSP analysis and tuning

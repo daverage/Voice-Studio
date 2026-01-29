@@ -1,6 +1,6 @@
 [package]
 name = "vxcleaner"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 authors = ["Andrzej Marczewski"]
 
@@ -16,6 +16,8 @@ nih_plug_vizia = { git = "https://github.com/robbert-vdh/nih-plug.git" }
 assert_no_alloc = { git = "https://github.com/robbert-vdh/rust-assert-no-alloc.git", branch = "feature/nested-permit-forbid" }
 
 anyhow = "1.0"
+semver = "1.0"
+ureq = "3.1"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

@@ -16,7 +16,7 @@ use crate::dsp::speech_confidence::SpeechSidechain;
 // -----------------------------
 
 const RUMBLE_MIN_HZ: f32 = 20.0;
-const RUMBLE_MAX_HZ: f32 = 120.0; 
+const RUMBLE_MAX_HZ: f32 = 120.0;
 
 const HISS_SHELF_HZ: f32 = 8000.0;
 const HISS_MAX_CUT_DB: f32 = -24.0;
@@ -82,7 +82,8 @@ impl HissRumble {
         // -----------------------------
 
         // Rumble = raise HPF cutoff (20Hz -> 120Hz)
-        self.rumble_hz_target = RUMBLE_MIN_HZ + (RUMBLE_MAX_HZ - RUMBLE_MIN_HZ) * rumble_amt.clamp(0.0, 1.0);
+        self.rumble_hz_target =
+            RUMBLE_MIN_HZ + (RUMBLE_MAX_HZ - RUMBLE_MIN_HZ) * rumble_amt.clamp(0.0, 1.0);
 
         // Hiss = HF shelf cut (0 -> -24dB)
         // Relax during speech to protect sibilance

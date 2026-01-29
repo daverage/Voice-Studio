@@ -123,257 +123,127 @@
             <div class="section">
                 <h2>About VxCleaner</h2>
                 <p>
-                    VxCleaner is a professional vocal restoration and
-                    enhancement plugin designed specifically for spoken voice.
-                    Its goal is to make dialogue feel clear, stable, and
-                    effortless to listen to without sounding processed.
+                    VxCleaner is a professional vocal restoration and enhancement plugin built for dialogue, voice-over, and broadcast work.
+                    The DSP chain is deterministic, real-time, and tuned specifically for speech so you can clean recordings without kybashing their tonal balance.
                 </p>
                 <p>
-                    VxCleaner is not a collection of independent effects. It
-                    is a guided system with a fixed signal flow, perceptual
-                    safety limits, and intentional constraints designed to
-                    preserve natural voice character.
+                    The plugin combines a fixed signal path with perceptual safety limits, automatic protection, and tight parameter smoothing so that you make musical edits without needing to become an audio engineer.
                 </p>
-                <p>
-                    Several corrective processes run automatically in the
-                    background. These are always active, carefully tuned for
-                    speech, and intentionally hidden to avoid unnecessary
-                    technical decisions.
-                </p>
-
-                <h3>Designed For</h3>
-                <ul>
-                    <li>
-                        Voice-over, podcasting, broadcast, dialogue, and
-                        narration
-                    </li>
-                    <li>Real-time use in DAWs and live monitoring workflows</li>
-                    <li>
-                        Reducing noise, room coloration, and vocal inconsistency
-                    </li>
-                </ul>
-
-                <h3>Not Designed For</h3>
-                <ul>
-                    <li>Singing or melodic material</li>
-                    <li>
-                        Non-stationary noises such as clicks, bangs, keyboard
-                        hits, or other transient events that require manual or
-                        offline repair
-                    </li>
-                    <li>Severely clipped or distorted recordings</li>
-                    <li>Forensic spectral editing workflows</li>
-                </ul>
             </div>
 
             <div class="section">
-                <h2>Modes</h2>
-
+                <h2>Simple Mode Macros</h2>
                 <div class="control-group">
-                    <div class="control-name">Simple Mode</div>
+                    <div class="control-name">CLEAN</div>
                     <p>
-                        Simple Mode offers three macro controls that adjust
-                        multiple processors at once. It is designed for fast,
-                        reliable results without technical decision-making.
+                        Boosts the cleanup stage. It raises <span class="highlight">Rumble</span>, <span class="highlight">Hiss</span>, the adaptive <span class="highlight">Noise Reduction</span> gate, and the <span class="highlight">Static Noise</span> capture so room tone is swept away first.
+                    </p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">ENHANCE</div>
+                    <p>
+                        Leans on the shaping stage ( <span class="highlight">Proximity</span> + <span class="highlight">Clarity</span>) to give the voice more body and articulation while remaining natural.
+                    </p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">CONTROL</div>
+                    <p>
+                        Commands the dynamics/damping stage. It raises <span class="highlight">De-Ess</span> and <span class="highlight">Leveler</span> activity and finally nudges <span class="highlight">Output Gain</span> so loudness stays even.
+                    </p>
+                </div>
+                <p>
+                    The macros translate your fast, simple moves into precise multi-slider changes under the hood. You can mix simple (macro) mode with advanced pulls—every slider still responds when you switch tabs.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>Noise Removal Tool</h2>
+                <div class="control-group">
+                    <div class="control-name">Noise Reduction + Static Noise</div>
+                    <p>
+                        The adaptive denoiser continuously analyzes the spectral noise floor, performs speech detection, and applies a hybrid Wiener-style filter that favors clarity over aggressive attenuation.
                     </p>
                     <ul>
                         <li>
-                            <span class="highlight">Distance</span> – Room
-                            reduction and proximity shaping
+                            <span class="highlight">Noise Reduction</span> is the primary slider—push it right to tighten the noise gate and bring down steady hum, air, and room noise.
                         </li>
                         <li>
-                            <span class="highlight">Clarity</span> – Noise,
-                            de-essing, and spectral cleanup
+                            <span class="highlight">Static Noise</span> captures the steady room tone: hold <strong>Learn</strong> while the unwanted noise is playing, then release to let the filter lock onto that spectrum. Tap <strong>Clear</strong> to reset the learned profile if the noise changes.
                         </li>
                         <li>
-                            <span class="highlight">Consistency</span> –
-                            Loudness stability and dynamics
+                            The <span class="highlight">Quality</span> meter below the noise controls reports how much noise is currently tracked. Stay around the middle of the meter to keep the noise floor suppressed without breathing artifacts.
+                        </li>
+                        <li>
+                            All of this runs together: Noise Reduction, Static Noise, and the Learn/Clear buttons form the noise removal tool so you can handle both broadband and tonal stationary noise in one workflow.
                         </li>
                     </ul>
-                </div>
-
-                <div class="control-group">
-                    <div class="control-name">Advanced Mode</div>
-                    <p>
-                        Advanced Mode exposes individual controls for precise
-                        influence over each processing stage. Some advanced
-                        controls indirectly influence automatic processes
-                        without exposing technical parameters.
-                    </p>
                 </div>
             </div>
 
             <div class="section">
-                <h2>Controls Explained</h2>
-
+                <h2>Clean &amp; Repair Sliders</h2>
                 <div class="control-group">
-                    <div class="control-name">Clean & Repair</div>
-                    <ul>
-                        <li>
-                            <span class="highlight">Noise Reduction</span> –
-                            Reduces steady background noise (Normal/Aggressive)
-                        </li>
-                        <li>
-                            <span class="highlight">Rumble</span> –
-                            Cuts low-frequency mechanical noise (20–120 Hz)
-                        </li>
-                        <li>
-                            <span class="highlight">Hiss</span> –
-                            Cuts high-frequency broadband noise (>8 kHz)
-                        </li>
-                        <li>
-                            <span class="highlight">Static Noise</span> –
-                            Learns and removes stationary room tone (Learn/Clear)
-                        </li>
-                        <li>
-                            <span class="highlight">De-Verb</span> – Reduces
-                            room reflections
-                        </li>
-                        <li>
-                            <span class="highlight">Clarity</span> – Improves
-                            intelligibility by reducing mud
-                        </li>
-                    </ul>
+                    <div class="control-name">Rumble</div>
+                    <p>High-pass filtering focused on 20–120 Hz to tame mechanical thumps and stage vibration.</p>
                 </div>
-
+                <div class="control-group">
+                    <div class="control-name">Hiss</div>
+                    <p>Broadband attenuation above ~8 kHz that keeps air noise from creeping into the upper register.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">Static Noise</div>
+                    <p>Learns a constant hum/tone from the room; use the Learn button to capture noise and Clear to reset.</p>
+                </div>
                 <div class="control-group">
                     <div class="control-name">Noise Reduction</div>
-                    <p>
-                        VxCleaner relies on the DSP denoiser described above,
-                        which combines adaptive spectral profiling, dynamic
-                        Wiener filtering, and speech-presence detection to
-                        transparently suppress broadband noise while preserving
-                        speech quality.
-                    </p>
+                    <p>Adaptive noise floor reduction mixing spectral gating and energy-aware smoothing; dial in the amount of suppression.</p>
                 </div>
-
                 <div class="control-group">
-                    <div class="control-name">Our Advanced DSP Technology</div>
-                    <p>
-                        VxCleaner's proprietary DSP engine represents the
-                        pinnacle of audio restoration technology:
-                    </p>
-                    <ul>
-                        <li>
-                            <span class="highlight"
-                                >Adaptive Noise Profiling</span
-                            >
-                            – Continuously analyzes and adapts to changing noise
-                            characteristics
-                        </li>
-                        <li>
-                            <span class="highlight"
-                                >Spectral Masking Algorithms</span
-                            >
-                            – Preserves vocal clarity while eliminating unwanted
-                            artifacts
-                        </li>
-                        <li>
-                            <span class="highlight"
-                                >Real-Time Wiener Filtering</span
-                            >
-                            – Mathematically optimal noise reduction with
-                            minimal speech distortion
-                        </li>
-                        <li>
-                            <span class="highlight"
-                                >Voice-Optimized Processing</span
-                            >
-                            – Specifically tuned for human speech patterns and
-                            frequencies
-                        </li>
-                        <li>
-                            <span class="highlight"
-                                >Zero-Latency Operation</span
-                            >
-                            – Perfect for real-time monitoring and recording
-                        </li>
-                    </ul>
-                    <p>
-                        Our DSP technology delivers professional-grade results
-                        that rival expensive standalone solutions, all while
-                        maintaining the natural character of your voice.
-                    </p>
+                    <div class="control-name">De-Verb</div>
+                    <p>Controls early reflection suppression to pull the source forward inside the mix.</p>
                 </div>
-
                 <div class="control-group">
-                    <div class="control-name">Polish & Enhance</div>
-                    <ul>
-                        <li>
-                            <span class="highlight">Proximity</span> – Restores
-                            close-mic body (120–300 Hz)
-                        </li>
-                        <li>
-                            <span class="highlight">De-Ess</span> – Controls
-                            harsh sibilance
-                        </li>
-                        <li>
-                            <span class="highlight">Leveler</span> – Smooths
-                            loudness variation
-                        </li>
-                        <li>
-                            <span class="highlight">Output Gain</span> – Final
-                            level adjustment
-                        </li>
-                    </ul>
+                    <div class="control-name">Breath Control</div>
+                    <p>Attenuates breaths and mouth noise between syllables while preserving the inhale energy.</p>
                 </div>
+            </div>
 
+            <div class="section">
+                <h2>Shape &amp; Polish Sliders</h2>
+                <div class="control-group">
+                    <div class="control-name">Proximity</div>
+                    <p>Restores low-frequency warmth for close-mic performances and compensates for distance.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">Clarity</div>
+                    <p>Sculpts the upper mids to remove muddiness and enhance articulation.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">De-Ess</div>
+                    <p>Limits harsh sibilance while retaining intelligible consonants.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">Leveler</div>
+                    <p>Smooths loudness variations with a transparent compressor- style curve.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Final Output</h2>
+                <div class="control-group">
+                    <div class="control-name">Gain</div>
+                    <p>The last slider before the limiter; use it to match your DAW gain structure or to feed delivery presets.</p>
+                </div>
                 <div class="control-group">
                     <div class="control-name">Final Output Presets</div>
                     <p>
-                        Delivery contracts that enforce loudness and true-peak
-                        targets:
-                    </p>
-                    <ul>
-                        <li>
-                            <span class="highlight">None</span> - No loudness
-                            enforcement
-                        </li>
-                        <li>
-                            <span class="highlight">Broadcast</span> - -23 LUFS
-                            integrated loudness, -1.0 dBTP true peak ceiling
-                        </li>
-                        <li>
-                            <span class="highlight">YouTube</span> - -14 LUFS
-                            integrated loudness, -1.0 dBTP true peak ceiling
-                        </li>
-                        <li>
-                            <span class="highlight">Spotify</span> - -14 LUFS
-                            integrated loudness, -1.0 dBTP true peak ceiling
-                        </li>
-                    </ul>
-                </div>
-
-                <div class="control-group">
-                    <div class="control-name">
-                        Automatic Background Processing
-                    </div>
-                    <ul>
-                        <li>
-                            <span class="highlight"
-                                >Speech High-Pass Filtering</span
-                            >
-                            – Removes subsonic rumble
-                        </li>
-                        <li>
-                            <span class="highlight">Plosive Softening</span> –
-                            Controls low-frequency consonant bursts
-                        </li>
-                        <li>
-                            <span class="highlight">Breath Management</span> –
-                            Reduces breath prominence during pauses
-                        </li>
-                    </ul>
-                    <p>
-                        These processes are conservative, speech-aware, and
-                        never mute the signal.
+                        Select delivery targets that enforce loudness/true peak ceilings: None, Broadcast (-23 LUFS / -1.0 dBTP), YouTube (-14 LUFS / -1.0 dBTP), or Spotify (-14 LUFS / -1.0 dBTP).
                     </p>
                 </div>
             </div>
 
             <div class="section">
                 <h2>Audio Processing Chain</h2>
-
                 <div class="audio-chain">
                     <div class="chain-step">
                         <div class="chain-step-number">1</div>
@@ -389,7 +259,7 @@
                     </div>
                     <div class="chain-step">
                         <div class="chain-step-number">4</div>
-                        Speech Analysis & Envelope Tracking
+                        Speech Analysis &amp; Envelope Tracking
                     </div>
                     <div class="chain-step">
                         <div class="chain-step-number">5</div>
@@ -413,11 +283,11 @@
                     </div>
                     <div class="chain-step">
                         <div class="chain-step-number">10</div>
-                        Creative Shaping (Proximity/Clarity)
+                        Creative Shaping (Proximity / Clarity)
                     </div>
                     <div class="chain-step">
                         <div class="chain-step-number">11</div>
-                        Dynamics & Guardrails
+                        Dynamics &amp; Guardrails
                     </div>
                     <div class="chain-step">
                         <div class="chain-step-number">12</div>
@@ -433,10 +303,10 @@
             <div class="section">
                 <h2>Technical Notes</h2>
                 <ul>
-                    <li>All processing is real-time with minimal latency</li>
-                    <li>Parameters are smoothed to prevent artifacts</li>
-                    <li>Phase coherence is preserved</li>
-                    <li>Some processing is intentionally hidden for safety</li>
+                    <li>All processing runs with deterministic, audio-thread safe DSP.</li>
+                    <li>Parameters are smoothed to prevent artifacts whenever a slider jumps.</li>
+                    <li>Hidden processes (plosive softening, breath management, etc.) always remain conservative to protect intelligibility.</li>
+                    <li>The noise removal tool already combines adaptive spectral gating, quality monitoring, and a learned static profile.</li>
                 </ul>
             </div>
 
