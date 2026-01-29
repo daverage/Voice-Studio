@@ -1,15 +1,15 @@
-# Tasks – Review docs and plan versioning/build/publishing updates
+# Tasks – Release v0.1.0
 
-- [x] Review current docs
-  - [x] Read automated versioning + publishing doc
-  - [x] Read generic template doc
-  - [x] Read MCP troubleshooting doc
-  - [x] Read publishing system doc
-  - [x] Read versioning system doc
-- [x] Identify issues/risks/inconsistencies
-  - [x] Note conflicts or gaps across docs
-  - [x] Flag unclear or risky steps
-- [x] Draft update plan for versioning/build/publishing
-  - [x] Outline desired policy changes
-  - [x] Propose doc/update checklist
-  - [x] Call out open questions
+- [x] Prepare release inputs
+  - [x] Confirm commit message
+  - [x] Verify required Rust targets installed
+- [x] Configure cross build toolchains
+  - [x] Install/use cross for Linux
+  - [x] Install/use xwin for Windows
+- [x] Run release script
+  - [x] Build macOS bundles
+  - [x] Build Windows bundles
+  - [x] Build Linux bundles (deferred for this beta)
+  - [x] Create zips with help.html at root
+  - [x] Create commit + tag v0.1.0
+  - [x] Create gh release and upload assets

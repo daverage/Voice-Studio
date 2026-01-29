@@ -14,7 +14,12 @@
 /.gemini/
 /.qwen/
 /xwin/
-
+/.xwin-cache/
+/.DS_Store
+/.DS_Store?
+**/.DS_Store
+.tinymem/*
+.tinymem/logs*
 # Wildcard safety (covers nested or renamed variants)
 .tinymem*
 .claude*
