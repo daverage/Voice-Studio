@@ -159,17 +159,8 @@ for entry in "${TARGETS[@]}"; do
     cp -R "${bundle_path}" "${temp_dir}/"
     cp "src/help.html" "${temp_dir}/help.html"
 
-    if [[ "${os}" == "macos" ]]; then
-      ln -s "/Library/Audio/Plug-Ins/VST" "${temp_dir}/VST Folder"
-      ln -s "/Library/Audio/Plug-Ins/VST3" "${temp_dir}/VST3 Folder"
-    fi
-
     zip_name="vxcleaner-${os}-${kind}.zip"
-    if [[ "${os}" == "macos" ]]; then
-      (cd "${temp_dir}" && zip -r -y "../${zip_name}" . >/dev/null)
-    else
-      (cd "${temp_dir}" && zip -r "../${zip_name}" . >/dev/null)
-    fi
+    (cd "${temp_dir}" && zip -r "../${zip_name}" . >/dev/null)
     rm -rf "${temp_dir}"
   done
 done

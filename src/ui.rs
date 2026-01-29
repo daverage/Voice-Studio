@@ -128,7 +128,6 @@ impl Model for VoiceStudioData {
                 cx.needs_redraw();
             }
         });
-
         event.map(|version_event, _| match version_event {
             VersionEvent::Update(info) => {
                 self.version_info = info.clone();
@@ -161,11 +160,36 @@ type VoiceParamsBoolLens = Map<Wrapper<voice_studio_data_derived_lenses::params>
 #[cfg(feature = "debug")]
 fn resolve_theme_css_path() -> Option<std::path::PathBuf> {
     // Get the path to the VST binary
+    // macOS: .../vxcleaner/vxcleaner.vst3/Contents/MacOS/vxcleaner
+    // Linux: ~/.vst3/vxcleaner.vst3/x86_64-linux/vxcleaner.so
+    // Windows: .../VST3/vxcleaner.vst3/Contents/x86_64-win/vxcleaner.vst3
     let exe_path = std::env::current_exe().ok()?;
-    let exe_dir = exe_path.parent()?;
 
-    // Create themes/default/ui.css in the same directory as the VST
-    Some(exe_dir.join("themes").join("default").join("ui.css"))
+    // Navigate up to find the bundle root (vxcleaner folder or vxcleaner.vst3)
+    // On macOS we need to go: MacOS -> Contents -> vxcleaner.vst3 -> vxcleaner (parent)
+    #[cfg(target_os = "macos")]
+    {
+        let macos_dir = exe_path.parent()?; // Contents/MacOS
+        let contents_dir = macos_dir.parent()?; // Contents
+        let vst_bundle = contents_dir.parent()?; // vxcleaner.vst3
+        let bundle_root = vst_bundle.parent()?; // vxcleaner (outer folder)
+        Some(bundle_root.join("themes").join("default").join("ui.css"))
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let arch_dir = exe_path.parent()?; // x86_64-linux
+        let vst_bundle = arch_dir.parent()?; // vxcleaner.vst3
+        Some(vst_bundle.join("themes").join("default").join("ui.css"))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let arch_dir = exe_path.parent()?; // x86_64-win
+        let contents_dir = arch_dir.parent()?; // Contents
+        let vst_bundle = contents_dir.parent()?; // vxcleaner.vst3
+        Some(vst_bundle.join("themes").join("default").join("ui.css"))
+    }
 }
 
 pub struct LevelMeter {
@@ -438,12 +462,21 @@ impl View for SliderVisuals {
     }
 
     fn draw(&self, cx: &mut DrawContext, canvas: &mut Canvas) {
+        if matches!(
+            self.param_id,
+            ParamId::MacroDistance | ParamId::MacroClarity | ParamId::MacroConsistency
+        ) {
+            return;
+        }
+
         let b = cx.bounds();
         let val = match self.param_id {
             ParamId::NoiseReduction => self.params.noise_reduction.modulated_normalized_value(),
             ParamId::RumbleAmount => self.params.rumble_amount.modulated_normalized_value(),
             ParamId::HissAmount => self.params.hiss_amount.modulated_normalized_value(),
-            ParamId::NoiseLearnAmount => self.params.noise_learn_amount.modulated_normalized_value(),
+            ParamId::NoiseLearnAmount => {
+                self.params.noise_learn_amount.modulated_normalized_value()
+            }
             ParamId::ReverbReduction => self.params.reverb_reduction.modulated_normalized_value(),
             ParamId::Clarity => self.params.clarity.modulated_normalized_value(),
             ParamId::Proximity => self.params.proximity.modulated_normalized_value(),
@@ -467,7 +500,7 @@ impl View for SliderVisuals {
         if val > 0.0 {
             let mut f = vg::Path::new();
             f.rounded_rect(b.x, b.y, b.w * val, b.h, 3.0);
-            canvas.fill_path(&f, &vg::Paint::color(vg::Color::rgba(59, 130, 246, 180)));
+            canvas.fill_path(&f, &vg::Paint::color(vg::Color::rgba(59, 130, 246, 200)));
         }
     }
 }
@@ -564,7 +597,7 @@ fn create_slider<'a, P>(
     gui: Arc<dyn GuiContext>,
     id: ParamId,
     map: impl Fn(&Arc<VoiceParams>) -> &P + Copy + 'static,
-) -> Handle<'a, VStack>
+) -> Handle<'a, HStack>
 where
     P: Param + 'static,
 {
@@ -575,24 +608,31 @@ where
         ParamId::MacroDistance | ParamId::MacroClarity | ParamId::MacroConsistency
     );
 
-    VStack::new(cx, move |cx| {
-        HStack::new(cx, move |cx| {
-            Label::new(cx, label).class("slider-label").text_wrap(false);
-            Element::new(cx).class("fill-width");
-        })
-        .class("slider-header");
+    HStack::new(cx, move |cx| {
+        Label::new(cx, label)
+            .class("slider-label")
+            .class("adv-label")
+            .text_wrap(false);
 
         ZStack::new(cx, move |cx| {
             SliderVisuals::new(cx, params.clone(), id).class("fill-both");
-            ParamSlider::new(cx, VoiceStudioData::params, move |p| map(p))
-                .class("fill-both")
-                .class("input-hidden");
+
+            // Value display (centered in slider)
             let lens = ParamWidgetBase::make_lens(VoiceStudioData::params, map, |p: &P| {
                 p.normalized_value_to_string(p.unmodulated_normalized_value(), true)
             });
-            Label::new(cx, lens).class("slider-value").z_index(2);
+            Label::new(cx, lens)
+                .class("slider-value")
+                .class("adv-value")
+                .hoverable(false);
+
+            ParamSlider::new(cx, VoiceStudioData::params, move |p| map(p))
+                .class("fill-both")
+                .class("input-hidden");
         })
         .class("slider-visual")
+        .class("adv-slider")
+        .class("fill-width")
         .on_mouse_down(move |_, _| {
             if disable_macros {
                 set_macro_mode(&p_m, &g_m, false);
@@ -600,6 +640,7 @@ where
         });
     })
     .class("slider-container")
+    .class("adv-row")
 }
 
 fn create_macro_dial<'a, P>(
@@ -620,6 +661,12 @@ where
             // Visual representation (behind)
             DialVisuals::new(cx, params.clone(), id).class("fill-both");
 
+            // Value display (centered in dial)
+            let lens = ParamWidgetBase::make_lens(VoiceStudioData::params, map, |p: &P| {
+                p.normalized_value_to_string(p.unmodulated_normalized_value(), true)
+            });
+            Label::new(cx, lens).class("dial-value").hoverable(false);
+
             // Interactive slider (in front, invisible)
             ParamSlider::new(cx, VoiceStudioData::params, move |p| map(p))
                 .class("fill-both")
@@ -627,12 +674,6 @@ where
                 .z_index(1);
         })
         .class("dial-visual");
-
-        // Value display
-        let lens = ParamWidgetBase::make_lens(VoiceStudioData::params, map, |p: &P| {
-            p.normalized_value_to_string(p.unmodulated_normalized_value(), true)
-        });
-        Label::new(cx, lens).class("dial-value");
     })
     .class("dial-container")
 }
@@ -677,8 +718,7 @@ fn create_dropdown<'a>(
                             });
                     }
                 })
-                .class("dropdown-options")
-                .class("dropdown-popup");
+                .class("dropdown-options");
             },
         )
         .class("dropdown-box");
@@ -713,7 +753,6 @@ fn create_dsp_preset_dropdown<'a>(
                         DspPreset::Manual,
                         DspPreset::PodcastNoisy,
                         DspPreset::VoiceoverStudio,
-                        DspPreset::MudFree,
                         DspPreset::InterviewOutdoor,
                         DspPreset::BroadcastClean,
                     ]
@@ -725,7 +764,6 @@ fn create_dsp_preset_dropdown<'a>(
 
                         Label::new(cx, preset_value.name())
                             .class("dropdown-option")
-                            .class("dsp-dropdown-option")
                             .on_press(move |cx| {
                                 let setter = ParamSetter::new(gui_item.as_ref());
 
@@ -775,16 +813,24 @@ fn create_dsp_preset_dropdown<'a>(
                                     setter.end_set_parameter(&params_item.breath_control);
 
                                     setter.begin_set_parameter(&params_item.macro_clean);
-                                    setter.set_parameter(&params_item.macro_clean, values.macro_clean);
+                                    setter.set_parameter(
+                                        &params_item.macro_clean,
+                                        values.macro_clean,
+                                    );
                                     setter.end_set_parameter(&params_item.macro_clean);
 
                                     setter.begin_set_parameter(&params_item.macro_enhance);
-                                    setter.set_parameter(&params_item.macro_enhance, values.macro_enhance);
+                                    setter.set_parameter(
+                                        &params_item.macro_enhance,
+                                        values.macro_enhance,
+                                    );
                                     setter.end_set_parameter(&params_item.macro_enhance);
 
                                     setter.begin_set_parameter(&params_item.macro_control);
-                                    setter
-                                        .set_parameter(&params_item.macro_control, values.macro_control);
+                                    setter.set_parameter(
+                                        &params_item.macro_control,
+                                        values.macro_control,
+                                    );
                                     setter.end_set_parameter(&params_item.macro_control);
                                 }
 
@@ -792,13 +838,10 @@ fn create_dsp_preset_dropdown<'a>(
                             });
                     }
                 })
-                .class("dropdown-options")
-                .class("dropdown-popup")
-                .class("dsp-dropdown-options");
+                .class("dropdown-options");
             },
         )
-        .class("dropdown-box")
-        .class("dsp-dropdown-box");
+        .class("dropdown-box");
     })
     .class("dropdown-row")
     .class("dsp-preset-dropdown")
@@ -837,7 +880,7 @@ fn build_levels(cx: &mut Context, meters: Arc<Meters>) {
             VStack::new(cx, move |cx| {
                 Label::new(cx, "IN").class("meter-label");
                 let mi2 = mi.clone();
-                HStack::new(cx, move |cx| {
+                HStack::new(cx, |cx| {
                     LevelMeter::new(cx, mi2.clone(), MeterType::InputL).class("meter-track");
                     LevelMeter::new(cx, mi2.clone(), MeterType::InputR).class("meter-track");
                 })
@@ -858,7 +901,7 @@ fn build_levels(cx: &mut Context, meters: Arc<Meters>) {
             VStack::new(cx, move |cx| {
                 Label::new(cx, "OUT").class("meter-label");
                 let mo2 = mo.clone();
-                HStack::new(cx, move |cx| {
+                HStack::new(cx, |cx| {
                     LevelMeter::new(cx, mo2.clone(), MeterType::OutputL).class("meter-track");
                     LevelMeter::new(cx, mo2.clone(), MeterType::OutputR).class("meter-track");
                 })
@@ -929,19 +972,16 @@ fn build_macro(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiConte
             create_macro_dial(cx, "ENHANCE", p.clone(), ParamId::MacroClarity, |pp| {
                 &pp.macro_enhance
             });
-            create_macro_dial(
-                cx,
-                "CONTROL",
-                p.clone(),
-                ParamId::MacroConsistency,
-                |pp| &pp.macro_control,
-            );
+            create_macro_dial(cx, "CONTROL", p.clone(), ParamId::MacroConsistency, |pp| {
+                &pp.macro_control
+            });
         })
         .class("dials-container");
 
         Element::new(cx).class("fill-height");
     })
-    .class("macro-column");
+    .class("macro-column")
+    .class("simple-container");
 }
 
 fn build_clean_repair_tab(
@@ -962,7 +1002,10 @@ fn build_clean_repair_tab(
                 |p| &p.rumble_amount,
             )
             .tooltip(|cx| {
-                Label::new(cx, "Removes low-frequency rumble and vibration below the voice.");
+                Label::new(
+                    cx,
+                    "Removes low-frequency rumble and vibration below the voice.",
+                );
             });
 
             create_slider(
@@ -980,7 +1023,6 @@ fn build_clean_repair_tab(
                 );
             });
 
-            // Static Noise Learn/Remove Section
             VStack::new(cx, |cx| {
                 create_slider(
                     cx,
@@ -991,66 +1033,66 @@ fn build_clean_repair_tab(
                     |p| &p.noise_learn_amount,
                 );
 
-                // Buttons and Meter Row
                 HStack::new(cx, |cx| {
-                    let params_down = params.clone();
-                    let gui_down = gui.clone();
-                    let params_up = params.clone();
-                    let gui_up = gui.clone();
-
-                    // Custom momentary button using Element/HStack to ensure event capture works
                     HStack::new(cx, |cx| {
-                        Label::new(cx, "Learn").hoverable(false); // Let parent handle events
-                    })
-                    .class("small-button")
-                    .on_mouse_down(move |cx, btn| {
-                        if btn == MouseButton::Left {
-                            let s = ParamSetter::new(gui_down.as_ref());
-                            s.begin_set_parameter(&params_down.noise_learn_trigger);
-                            s.set_parameter(&params_down.noise_learn_trigger, true);
-                            s.end_set_parameter(&params_down.noise_learn_trigger);
-                            cx.capture(); // Critical for momentary behavior
-                        }
-                    })
-                    .on_mouse_up(move |cx, btn| {
-                        if btn == MouseButton::Left {
-                            let s = ParamSetter::new(gui_up.as_ref());
-                            s.begin_set_parameter(&params_up.noise_learn_trigger);
-                            s.set_parameter(&params_up.noise_learn_trigger, false);
-                            s.end_set_parameter(&params_up.noise_learn_trigger);
-                            cx.release();
-                        }
-                    });
+                        let params_down = params.clone();
+                        let gui_down = gui.clone();
+                        let params_up = params.clone();
+                        let gui_up = gui.clone();
 
-                    let params_clear_down = params.clone();
-                    let gui_clear_down = gui.clone();
-                    let params_clear_up = params.clone();
-                    let gui_clear_up = gui.clone();
+                        HStack::new(cx, |cx| {
+                            Label::new(cx, "Learn").hoverable(false);
+                        })
+                        .class("small-button")
+                        .on_mouse_down(move |cx, btn| {
+                            if btn == MouseButton::Left {
+                                let s = ParamSetter::new(gui_down.as_ref());
+                                s.begin_set_parameter(&params_down.noise_learn_trigger);
+                                s.set_parameter(&params_down.noise_learn_trigger, true);
+                                s.end_set_parameter(&params_down.noise_learn_trigger);
+                                cx.capture(); // Critical for momentary behavior
+                            }
+                        })
+                        .on_mouse_up(move |cx, btn| {
+                            if btn == MouseButton::Left {
+                                let s = ParamSetter::new(gui_up.as_ref());
+                                s.begin_set_parameter(&params_up.noise_learn_trigger);
+                                s.set_parameter(&params_up.noise_learn_trigger, false);
+                                s.end_set_parameter(&params_up.noise_learn_trigger);
+                                cx.release();
+                            }
+                        });
 
-                    HStack::new(cx, |cx| {
-                        Label::new(cx, "Clear").hoverable(false);
-                    })
-                    .class("small-button")
-                    .on_mouse_down(move |cx, btn| {
-                        if btn == MouseButton::Left {
-                            let s = ParamSetter::new(gui_clear_down.as_ref());
-                            s.begin_set_parameter(&params_clear_down.noise_learn_clear);
-                            s.set_parameter(&params_clear_down.noise_learn_clear, true);
-                            s.end_set_parameter(&params_clear_down.noise_learn_clear);
-                            cx.capture();
-                        }
-                    })
-                    .on_mouse_up(move |cx, btn| {
-                        if btn == MouseButton::Left {
-                            let s = ParamSetter::new(gui_clear_up.as_ref());
-                            s.begin_set_parameter(&params_clear_up.noise_learn_clear);
-                            s.set_parameter(&params_clear_up.noise_learn_clear, false);
-                            s.end_set_parameter(&params_clear_up.noise_learn_clear);
-                            cx.release();
-                        }
-                    });
+                        let params_clear_down = params.clone();
+                        let gui_clear_down = gui.clone();
+                        let params_clear_up = params.clone();
+                        let gui_clear_up = gui.clone();
 
-                    // Quality Meter
+                        HStack::new(cx, |cx| {
+                            Label::new(cx, "Clear").hoverable(false);
+                        })
+                        .class("small-button")
+                        .on_mouse_down(move |cx, btn| {
+                            if btn == MouseButton::Left {
+                                let s = ParamSetter::new(gui_clear_down.as_ref());
+                                s.begin_set_parameter(&params_clear_down.noise_learn_clear);
+                                s.set_parameter(&params_clear_down.noise_learn_clear, true);
+                                s.end_set_parameter(&params_clear_down.noise_learn_clear);
+                                cx.capture();
+                            }
+                        })
+                        .on_mouse_up(move |cx, btn| {
+                            if btn == MouseButton::Left {
+                                let s = ParamSetter::new(gui_clear_up.as_ref());
+                                s.begin_set_parameter(&params_clear_up.noise_learn_clear);
+                                s.set_parameter(&params_clear_up.noise_learn_clear, false);
+                                s.end_set_parameter(&params_clear_up.noise_learn_clear);
+                                cx.release();
+                            }
+                        });
+                    })
+                    .class("output-actions");
+
                     VStack::new(cx, |cx| {
                         Label::new(cx, "Quality").class("mini-label");
                         NoiseLearnQualityMeter::new(cx, meters.clone())
@@ -1059,11 +1101,12 @@ fn build_clean_repair_tab(
                     })
                     .class("quality-meter-container");
                 })
-                .class("noise-learn-controls");
+                .class("output-row");
             })
             .class("group-container");
         })
-        .class("tab-column");
+        .class("tab-column")
+        .class("adv-column");
 
         // Column 2: Adaptive Cleanup
         VStack::new(cx, |cx| {
@@ -1109,8 +1152,10 @@ fn build_clean_repair_tab(
                 );
             });
         })
-        .class("tab-column");
+        .class("tab-column")
+        .class("adv-column");
     })
+    .class("adv-columns")
     .class("tab-content")
     .class("tab-clean-repair");
 }
@@ -1127,10 +1172,11 @@ fn build_shape_polish_tab(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<d
                 |p| &p.proximity,
             )
             .tooltip(|cx| {
-                Label::new(cx, "Adjusts perceived microphone distance and vocal warmth.");
+                Label::new(
+                    cx,
+                    "Adjusts perceived microphone distance and vocal warmth.",
+                );
             });
-
-            Element::new(cx).height(Pixels(12.0)); // Spacing
 
             create_slider(
                 cx,
@@ -1147,7 +1193,8 @@ fn build_shape_polish_tab(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<d
                 );
             });
         })
-        .class("tab-column");
+        .class("tab-column")
+        .class("adv-column");
 
         VStack::new(cx, |cx| {
             create_slider(
@@ -1167,15 +1214,11 @@ fn build_shape_polish_tab(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<d
                 ParamId::Leveler,
                 |p| &p.leveler,
             );
-
-            VStack::new(cx, |cx| {
-                Label::new(cx, "Limiter").class("slider-label");
-                Label::new(cx, "Automatic Safety").class("mini-label");
-            })
-            .class("group-container");
         })
-        .class("tab-column");
+        .class("tab-column")
+        .class("adv-column");
     })
+    .class("adv-columns")
     .class("tab-content")
     .class("tab-shape-polish");
 }
@@ -1245,7 +1288,11 @@ fn build_header(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
                         move |_| set_macro_mode(&p2, &g2, false),
                         |cx| Label::new(cx, "Advanced"),
                     )
-                    .class(if m { "mode-button" } else { "mode-button-active" });
+                    .class(if m {
+                        "mode-button"
+                    } else {
+                        "mode-button-active"
+                    });
                 })
                 .class("mode-group");
             },
@@ -1274,8 +1321,6 @@ fn open_url(url: &str) {
     }
 }
 
-const RELEASES_URL: &str = "https://github.com/daverage/voice-studio/releases";
-
 fn build_footer(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiContext>) {
     HStack::new(cx, move |cx| {
         Binding::new(
@@ -1283,37 +1328,31 @@ fn build_footer(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
             VoiceStudioData::version_info.map(|info| info.clone()),
             move |cx, lens| {
                 let info = lens.get(cx);
+                let label_text = info.label.clone();
+                let detail_text = info.detail.clone();
                 let status = info.status;
-                let current_label = info.label.clone();
-                let latest_version = info.latest_version.clone();
+                let release_url = info.release_url.clone();
 
-                let label_text = match status {
-                    VersionStatus::UpdateAvailable => {
-                        if let Some(ver) = latest_version {
-                            format!("{} (Update Available v{})", current_label, ver)
+                VStack::new(cx, move |cx| {
+                    Label::new(cx, label_text.as_str()).class("version-text").class(
+                        if status == VersionStatus::UpdateAvailable {
+                            "version-update"
                         } else {
-                            format!("{} (Update Available)", current_label)
-                        }
-                    }
-                    _ => current_label,
-                };
-
-                Button::new(
-                    cx,
-                    move |_| open_url(RELEASES_URL),
-                    move |cx| {
-                        Label::new(cx, label_text.as_str())
-                            .class("version-text")
-                            .class(
-                            if status == VersionStatus::UpdateAvailable {
-                                "version-update"
-                            } else {
-                                "version-normal"
-                            },
+                            "version-normal"
+                        },
+                    );
+                    Label::new(cx, detail_text.as_str()).class("version-detail");
+                    if let Some(url) = release_url {
+                        Button::new(
+                            cx,
+                            move |_| open_url(&url),
+                            |cx| Label::new(cx, "View Release"),
                         )
-                    },
-                )
-                .class("version-link");
+                        .class("footer-button")
+                        .class("version-release-button");
+                    }
+                })
+                .class("version-stack");
             },
         );
 
@@ -1327,32 +1366,7 @@ fn build_footer(cx: &mut Context, params: Arc<VoiceParams>, gui: Arc<dyn GuiCont
             Button::new(
                 cx,
                 move |_| {
-                    let path = if let Ok(mut p) = std::env::current_dir() {
-                        p.push("src/help.html");
-                        if p.exists() {
-                            p.to_string_lossy().to_string()
-                        } else {
-                            "src/help.html".to_string()
-                        }
-                    } else {
-                        "src/help.html".to_string()
-                    };
-                    #[cfg(target_os = "macos")]
-                    {
-                        let _ = std::process::Command::new("open").arg(&path).spawn();
-                    }
-                    #[cfg(target_os = "linux")]
-                    {
-                        let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
-                    }
-                    #[cfg(target_os = "windows")]
-                    {
-                        let _ = std::process::Command::new("cmd")
-                            .arg("/c")
-                            .arg("start")
-                            .arg(&path)
-                            .spawn();
-                    }
+                    open_url("https://www.marczewski.me.uk/vxcleaner/help.html");
                 },
                 |cx| Label::new(cx, "Help"),
             )
@@ -1599,46 +1613,56 @@ pub fn build_ui(
                             let g_tabs = gui_local.clone();
                             let m_tabs = m.clone();
 
-                            HStack::new(cx, move |cx| {
-                                Binding::new(cx, VoiceStudioData::advanced_tab, move |cx, tab_lens| {
-                                    let current_tab = tab_lens.get(cx);
-
-                                    // Clean & Repair Tab
-                                    Button::new(
-                                        cx,
-                                        |ex| ex.emit(AdvancedTabEvent::SetTab(AdvancedTab::CleanRepair)),
-                                        |cx| Label::new(cx, "Clean & Repair"),
-                                    )
-                                    .class(if current_tab == AdvancedTab::CleanRepair {
-                                        "tab-header-active"
-                                    } else {
-                                        "tab-header"
-                                    });
-
-                                    // Shape & Polish Tab
+                            Binding::new(cx, VoiceStudioData::advanced_tab, move |cx, tab_lens| {
+                                let current_tab = tab_lens.get(cx);
+                                HStack::new(cx, |cx| {
                                     Button::new(
                                         cx,
                                         |ex| {
-                                            ex.emit(AdvancedTabEvent::SetTab(AdvancedTab::ShapePolish))
+                                            ex.emit(AdvancedTabEvent::SetTab(
+                                                AdvancedTab::CleanRepair,
+                                            ))
+                                        },
+                                        |cx| Label::new(cx, "Clean & Repair"),
+                                    )
+                                    .class(
+                                        if current_tab == AdvancedTab::CleanRepair {
+                                            "tab-header-active"
+                                        } else {
+                                            "tab-header"
+                                        },
+                                    );
+
+                                    Button::new(
+                                        cx,
+                                        |ex| {
+                                            ex.emit(AdvancedTabEvent::SetTab(
+                                                AdvancedTab::ShapePolish,
+                                            ))
                                         },
                                         |cx| Label::new(cx, "Shape & Polish"),
                                     )
-                                    .class(if current_tab == AdvancedTab::ShapePolish {
-                                        "tab-header-active"
-                                    } else {
-                                        "tab-header"
-                                    });
-                                });
-                            })
-                            .class("tabs-container");
+                                    .class(
+                                        if current_tab == AdvancedTab::ShapePolish {
+                                            "tab-header-active"
+                                        } else {
+                                            "tab-header"
+                                        },
+                                    );
+                                })
+                                .class("tabs-container");
+                            });
 
                             // Tab Content
                             Binding::new(cx, VoiceStudioData::advanced_tab, move |cx, tab_lens| {
                                 let current_tab = tab_lens.get(cx);
                                 match current_tab {
-                                    AdvancedTab::CleanRepair => {
-                                        build_clean_repair_tab(cx, p_tabs.clone(), g_tabs.clone(), m_tabs.clone())
-                                    }
+                                    AdvancedTab::CleanRepair => build_clean_repair_tab(
+                                        cx,
+                                        p_tabs.clone(),
+                                        g_tabs.clone(),
+                                        m_tabs.clone(),
+                                    ),
                                     AdvancedTab::ShapePolish => {
                                         build_shape_polish_tab(cx, p_tabs.clone(), g_tabs.clone())
                                     }

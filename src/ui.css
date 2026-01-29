@@ -1,11 +1,14 @@
 /* ============================================================================
-   ROOT + UTILITIES
-   ============================================================================ */
+VxCLEANER UI STYLESHEET
+Vizia / Morphorm compatible
+============================================================================ */
 
-.root,
+/* ============================================================================
+ROOT / GLOBAL LAYOUT
+============================================================================ */
+
 .app-root {
     background-color: #0f172a;
-    font-family: "Roboto", sans-serif;
     color: #e2e8f0;
     min-width: 900px;
     min-height: 550px;
@@ -14,11 +17,9 @@
 .fill-width {
     width: 1s;
 }
-
 .fill-height {
     height: 1s;
 }
-
 .fill-both {
     width: 1s;
     height: 1s;
@@ -27,18 +28,6 @@
 .child-space-stretch {
     child-space: 1s;
 }
-
-.input-hidden {
-    opacity: 0%;
-}
-
-.output-accent {
-    color: #f97316;
-}
-
-/* ============================================================================
-   APP LAYOUT
-   ============================================================================ */
 
 .main-view {
     background-color: #0f172a;
@@ -49,75 +38,93 @@
 }
 
 .columns-container {
+    width: 1s;
     col-between: 40px;
-    width: 1s;
 }
 
-.footer-buttons {
-    col-between: 10px;
-    child-space: 1s;
-}
-
-.header-title-stack {
-    width: 1s;
+.spacer {
+    height: 18px;
 }
 
 /* ============================================================================
-   HEADER
-   ============================================================================ */
+HIDDEN / TRANSPARENT INPUTS
+============================================================================ */
+
+.input-hidden {
+    background-color: transparent;
+    border-color: transparent;
+    color: transparent;
+}
+
+.input-hidden .fill,
+.input-hidden .value {
+    background-color: transparent;
+    color: transparent;
+}
+
+/* ============================================================================
+PARAM SLIDER (nih_plug_vizia)
+============================================================================ */
+
+param-slider {
+    background-color: transparent;
+    width: 1s;
+    height: 1s;
+}
+
+param-slider .fill {
+    background-color: transparent;
+}
+
+/* ============================================================================
+HEADER
+============================================================================ */
 
 .header {
     height: 68px;
     background-color: #1e293b;
     border-bottom: 1px solid #334155;
-    padding-left: 24px;
-    padding-right: 24px;
+    child-left: 24px;
+    child-right: 24px;
     child-space: 1s;
-    text-align: left;
+}
+
+.header-title-stack {
+    width: 1s;
+    row-between: 2px;
+    left: 24px;
+    top: 10px;
 }
 
 .header-title {
     font-size: 22;
     font-weight: bold;
     color: #ffffff;
-    top: -10px;
 }
 
 .header-sub {
     font-size: 14;
     color: #94a3b8;
-    top: 2px;
-    bottom: -10px;
-}
-
-.header-title,
-.header-sub {
-    width: 1s;
-    text-align: left;
-    left: -150px;
 }
 
 /* ============================================================================
-   MODE BUTTONS (SIMPLE / ADVANCED)
-   ============================================================================ */
+MODE TOGGLE (SIMPLE / ADVANCED)
+============================================================================ */
 
 .mode-group {
-    col-between: 4px;
-    width: auto;
-    text-align: right;
+    col-between: 6px;
+    right: -100px;
 }
 
 .mode-button,
 .mode-button-active {
-    border-radius: 4px;
-    font-size: 14;
     height: 28px;
-    padding-left: 14px;
-    padding-right: 14px;
+    child-left: 14px;
+    child-right: 14px;
+    border-radius: 4px;
+    font-size: 13;
     border: 1px solid #334155;
     child-space: 1s;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
 }
 
 .mode-button {
@@ -125,171 +132,85 @@
     color: #94a3b8;
 }
 
-.mode-button label {
-    color: #94a3b8;
-}
-
 .mode-button:hover {
     background-color: #334155;
-    color: #e2e8f0;
-}
-
-.mode-button:hover label {
-    color: #e2e8f0;
+    color: #ffffff;
 }
 
 .mode-button-active {
     background-color: #1d4ed8;
     border-color: #3b82f6;
-    color: #e2e8f0;
+    color: #ffffff;
 }
-
-.mode-button-active label {
-    color: #e2e8f0;
-}
-
 .mode-button-active:hover {
-    background-color: #3b82f6;
-    border-color: #3b82f6;
-    color: #e2e8f0;
+    background-color: #4f8ff7;
 }
-
-.mode-button-active:hover label {
-    color: #e2e8f0;
-}
-
 /* ============================================================================
-   TABS (ADVANCED)
-   ============================================================================ */
+SIMPLE MODE
+============================================================================ */
 
-.tabs-container {
-    height: 40px;
-    col-between: 8px;
-    margin-bottom: 16px;
-    child-space: 1s;
-    top: -10px;
-    bottom: 10px;
-    left: 50%;
-}
-
-.tab-header,
-.tab-header-active {
-    border-radius: 4px;
-    font-size: 14;
-    height: 32px;
-    padding-left: 16px;
-    padding-right: 16px;
-    border: 1px solid #334155;
-    child-space: 1s;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.tab-header {
-    background-color: #1e293b;
-    color: #94a3b8;
-}
-
-.tab-header label {
-    color: #94a3b8;
-}
-
-.tab-header:hover {
-    background-color: #334155;
-    color: #e2e8f0;
-}
-
-.tab-header:hover label {
-    color: #e2e8f0;
-}
-
-.tab-header-active {
-    background-color: #1d4ed8;
-    border-color: #3b82f6;
-    color: #e2e8f0;
-}
-
-.tab-header-active label {
-    color: #e2e8f0;
-}
-
-.tab-header-active:hover {
-    background-color: #3b82f6;
-    border-color: #3b82f6;
-    color: #e2e8f0;
-}
-
-.tab-header-active:hover label {
-    color: #e2e8f0;
-}
-
-.tab-header-active:active {
-    background-color: #334155;
-    border-color: #3b82f6;
-    color: #e2e8f0;
-}
-
-.tab-header-active:active label {
-    color: #e2e8f0;
-}
-
-.tab-content {
+.simple-container {
     width: 1s;
-    height: 1s;
-    border-radius: 8px;
-    padding: 24px;
+    row-between: 24px;
+    top: -21px;
+
+    height: auto;
+    bottom: -250px;
 }
 
-.tab-clean-repair {
+/* --- Dials --- */
+
+.dials-container {
+    width: 100%;
+    left: 58.3%;
+    transform: translateX(-50%);
+    height: auto;
+}
+
+.dial-container {
+    width: 200px;
+    height: 200px;
+    row-between: 12px;
+    top: -0px;
+}
+
+.dial-label {
+    font-size: 18;
+    font-weight: bold;
+    color: #94a3b8;
+    text-align: center;
+}
+
+.dial-visual {
+    width: 160px;
+    height: 160px;
     background-color: #0f172a;
-    height: 250px;
+    border: 1px solid #334155;
+    border-radius: 12px;
 }
 
-.tab-shape-polish {
-    background-color: #0f172a;
-    height: 250px;
-}
-
-.tab-column {
-}
-
-/* ============================================================================
-   COLUMN HEADERS
-   ============================================================================ */
-
-.column-header {
+.dial-value {
     font-size: 16;
     font-weight: bold;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    height: 24px;
-    margin-bottom: 16px;
+    color: #ffffff;
+    text-align: center;
+    width: 1s;
+    height: 1s;
+    child-left: 1s;
+    child-right: 1s;
+    child-top: 1s;
+    child-bottom: 1s;
 }
 
-.col-levels {
-    color: #94a3b8;
-}
-
-.col-clean {
-    color: #60a5fa;
-}
-
-.col-polish {
-    color: #60a5fa;
-}
+/* ============================================================================
+LEVEL METERS (SHARED)
+============================================================================ */
 
 .levels-column {
     width: 180px;
     border-right: 1px solid #1e293b;
-    padding-right: 20px;
+    child-right: 20px;
 }
-
-.macro-column {
-}
-
-/* ============================================================================
-   METERS
-   ============================================================================ */
 
 .meter-grid {
     height: 260px;
@@ -299,26 +220,19 @@
 .meter-col {
     width: 44px;
 }
-
 .meter-track {
     width: 12px;
-}
-
-.meter-pair {
-    col-between: 2px;
-    height: 1s;
 }
 
 .meter-label {
     font-size: 14;
     color: #64748b;
     text-align: center;
-    bottom: 10px;
 }
 
 .noise-floor-row {
     height: 20px;
-    margin-top: 18px;
+    top: 18px;
 }
 
 .noise-floor-leds {
@@ -326,20 +240,14 @@
     height: 14px;
 }
 
-.spacer {
-    height: 18px;
-}
-
 /* ============================================================================
-   SLIDERS
-   ============================================================================ */
-sliders-container {
-}
+SLIDERS (SHARED)
+============================================================================ */
+
 .slider-container {
     height: 56px;
-    margin-bottom: 6px;
-    width: 90%;
-    bottom: 10px;
+    bottom: 6px;
+    top: 10px;
 }
 
 .slider-header {
@@ -349,282 +257,276 @@ sliders-container {
 .slider-label {
     font-size: 16;
     color: #94a3b8;
-    top: -2px;
+    text-align: right;
+    child-left: 1s;
 }
 
 .slider-value {
-    font-size: 16;
-    color: #f1f5f9;
+    font-size: 14;
     font-weight: bold;
+    color: #ffffff;
     text-align: center;
-    position-type: self-directed;
-    left: 50%;
-    transform: translateX(-50%);
-    right: 0;
-    top: 5px;
-    bottom: 0px;
+    width: 1s;
+    height: 1s;
+    child-left: 1s;
+    child-right: 1s;
+    child-top: 1s;
+    child-bottom: 1s;
 }
 
 .slider-visual {
     height: 30px;
+    background-color: #0f172a;
+    border-radius: 6px;
+    border: 1px solid #334155;
+}
+
+.slider-visuals {
+    background-color: transparent;
 }
 
 /* ============================================================================
-   SIMPLE MODE DIALS
-   ============================================================================ */
+OUTPUT (SHARED)
+============================================================================ */
 
-.dials-container {
-    col-between: 40px;
-    child-space: 1s;
-    left: 0%;
-    top: 110px;
+.output-section {
+    width: 1s;
+    row-between: 10px;
+    top: 150px;
 }
 
-.dial-container {
-    width: 180px;
-    height: 200px;
-}
-
-.dial-label {
-    font-size: 18;
-    color: #94a3b8;
-    text-align: center;
-    margin-bottom: 16px;
+.output-title,
+.output-accent {
+    font-size: 14;
     font-weight: bold;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    color: #f97316;
 }
 
-.dial-visual {
-    width: 150px;
-    height: 150px;
+.output-row {
+    width: 1s;
+    height: 32px;
+    child-space: 1s;
 }
 
-.dial-value {
-    font-size: 20;
+.output-actions {
+    col-between: 8px;
+}
+
+.output-slider {
+    width: 1s;
+    height: 28px;
+}
+
+.output-value {
+    width: 60px;
+    font-size: 14;
+    color: #ffffff;
+    text-align: right;
+}
+
+/* ============================================================================
+ADVANCED MODE
+============================================================================ */
+
+.advanced-container {
+    width: 1s;
+    row-between: 16px;
+}
+
+/* --- Tabs --- */
+
+.tabs-container {
+    height: 40px;
+    col-between: 8px;
+    bottom: 10px;
+}
+
+.tab-header,
+.tab-header-active {
+    height: 32px;
+    min-width: 120px;
+    child-left: 16px;
+    child-right: 16px;
+    border-radius: 4px;
+    border: 1px solid #334155;
+    font-size: 14;
+    child-space: 1s;
+}
+
+.tab-header {
+    background-color: #1e293b;
+    color: #94a3b8;
+}
+
+.tab-header:hover {
+    background-color: #334155;
+    color: #ffffff;
+}
+
+.tab-header-active {
+    background-color: #1d4ed8;
+    border-color: #3b82f6;
+    color: #ffffff;
+}
+.tab-header-active:hover {
+    background-color: #4f8ff7;
+}
+.tab-shape-polish {
+    background-color: #0f172a;
+}
+
+/* --- Advanced Rows --- */
+
+.adv-columns {
+    width: 1s;
+    col-between: 10px;
+}
+
+.adv-column {
+    width: 1s;
+    row-between: 12px;
+}
+
+.adv-row {
+    width: 1s;
+    height: 36px;
+    col-between: 12px;
+}
+
+.adv-label {
+    width: 100px;
+    font-size: 14;
+    color: #94a3b8;
+    text-align: right;
+}
+
+.adv-slider {
+    width: 1s;
+}
+
+.adv-value {
+    font-size: 14;
+    font-weight: bold;
     color: #ffffff;
     text-align: center;
-    font-weight: bold;
-    top: -45%;
-    left: 43%;
-    transform: translateX(-50%);
+    width: 1s;
+    height: 1s;
+    child-left: 1s;
+    child-right: 1s;
+    child-top: 1s;
+    child-bottom: 1s;
 }
 
 /* ============================================================================
-   DROPDOWNS (SHARED STRUCTURE)
-   ============================================================================ */
+DROPDOWNS (SHARED)
+============================================================================ */
 
 .dropdown-row {
     height: 32px;
-    margin-top: 10px;
     child-space: 1s;
-    top: -10px;
 }
 
 .dropdown-label {
-    font-size: 16;
+    width: 120px;
+    font-size: 14;
     color: #94a3b8;
-    margin-right: 12px;
 }
-
-.dropdown-selected {
-    color: #ffffff;
-    font-size: 16;
-}
-
-.dropdown-options {
-    background-color: #0f172a;
-}
-
-.dropdown-option {
-    background-color: #0f172a;
-    color: #cbd5e1;
-    font-size: 16;
-    padding-left: 8px;
-    padding-right: 8px;
-    height: 26px;
-    child-top: 5px;
-    width: 180px;
-}
-
-.dropdown-option:hover {
-    background-color: #1e293b;
-    color: #e2e8f0;
-}
-
-/* Dropdown widget elements */
 
 dropdown.dropdown-box {
     width: 180px;
     height: 28px;
-    border: 1px solid #334155;
-    border-radius: 4px;
-    left: 20px;
-}
-
-dropdown.dropdown-box .title {
-    background-color: #0f172a;
-    border: none;
-    border-radius: 4px;
-    padding-left: 8px;
-    padding-right: 8px;
-}
-
-dropdown.dropdown-box popup {
     background-color: #0f172a;
     border: 1px solid #334155;
     border-radius: 4px;
-    top: 32px;
 }
 
-.dropdown-popup {
-    top: 32px;
+.dropdown-selected {
+    font-size: 14;
+    color: #ffffff;
 }
 
-/* DSP dropdown overrides */
-
-.dsp-preset-dropdown {
-    top: -30px;
-    bottom: 50px;
+dropdown popup {
+    background-color: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 4px;
 }
 
-.dsp-dropdown-box {
+.dropdown-option {
+    height: 26px;
+    width: 100%;
+    child-left: 8px;
+    child-right: 8px;
+    font-size: 14;
+    color: #cbd5e1;
+    background-color: #0f172a;
 }
 
-.dsp-dropdown-options {
-    top: 32px;
-}
-
-.dsp-dropdown-option {
-}
-
-/* ============================================================================
-   OUTPUT
-   ============================================================================ */
-
-.output-section {
-    margin-top: 16px;
-    padding-top: 16px;
-    border-top: 1px solid #1e293b;
+.dropdown-option:hover {
+    background-color: #1e293b;
+    color: #ffffff;
 }
 
 /* ============================================================================
-   VERSION LABEL
-   ============================================================================ */
-
-.version-link {
-}
-
-.version-text {
-    font-size: 12;
-}
-
-.version-normal {
-}
-
-.version-update {
-}
-
-.version-detail {
-}
-
-.version-stack {
-}
-
-/* ============================================================================
-   FOOTER
-   ============================================================================ */
+FOOTER
+============================================================================ */
 
 .footer {
     height: 40px;
-    background-color: #0f172a;
     border-top: 1px solid #1e293b;
-    padding-left: 24px;
-    padding-right: 24px;
+    child-left: 24px;
+    child-right: 24px;
     child-space: 1s;
+    right: 54px;
+    bottom: 14px;
+}
+
+.footer-buttons {
+    col-between: 10px;
 }
 
 .footer-button {
+    height: 28px;
+    child-left: 12px;
+    child-right: 12px;
+    border-radius: 4px;
+    font-size: 14;
     background-color: #1e293b;
     border: 1px solid #334155;
     color: #cbd5e1;
-    border-radius: 4px;
-    font-size: 14;
-    height: 28px;
-    padding-left: 12px;
-    padding-right: 12px;
-    child-space: 1s;
 }
 
 .footer-button:hover {
     background-color: #334155;
-    color: #e2e8f0;
-}
-
-.reset-button {
-    background-color: #450a0a;
-    border-color: #991b1b;
-    color: #fecaca;
-    height: 28px;
-}
-
-.reset-button:hover {
-    background-color: #7f1d1d;
-    color: #fee2e2;
-}
-
-.copyright-text {
-    font-size: 10;
-    color: #64748b;
 }
 
 /* ============================================================================
-   NOISE LEARN CONTROLS
-   ============================================================================ */
-
-.group-container {
-    margin-top: 4px;
-    margin-bottom: 12px;
-}
-
-.noise-learn-controls {
-    height: 32px;
-    col-between: 8px;
-    child-top: 4px;
-}
+NOISE LEARN / SMALL CONTROLS
+============================================================================ */
 
 .small-button {
+    height: 30px;
+    width: 50px;
+    child-left: 8px;
+    child-right: 8px;
+    border-radius: 4px;
+    font-size: 13;
     background-color: #1e293b;
     border: 1px solid #334155;
     color: #cbd5e1;
-    border-radius: 4px;
-    font-size: 13;
-    height: 24px;
-    padding-left: 8px;
-    padding-right: 8px;
-    child-space: 1s;
-    text-align: center;
 }
 
 .small-button:hover {
     background-color: #334155;
-    color: #e2e8f0;
+    color: #ffffff;
 }
 
 .small-button:active {
     background-color: #1d4ed8;
-    border-color: #3b82f6;
-}
-
-.quality-meter-container {
-    width: 60px;
-    child-space: 1s;
+    border-color: #3b82f6tinymem;
 }
 
 .mini-label {
-    font-size: 10;
+    font-size: 12;
     color: #64748b;
-    text-transform: uppercase;
     text-align: center;
-    bottom: 2px;
 }
