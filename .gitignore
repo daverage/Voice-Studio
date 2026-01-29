@@ -1,8 +1,25 @@
-/target
-/.tinymem
-/.claude
-/.gemini
-/.qwen
-/test_automation
-/test_data
-/analysis_output
+# Build outputs
+/target/
+/dist/
+/analysis_output/
+
+# Test artifacts
+/test_automation/
+/test_data/
+
+# Agent / LLM state
+/.tinymem/
+/.tinyMem/
+/.claude/
+/.gemini/
+/.qwen/
+/xwin/
+
+# Wildcard safety (covers nested or renamed variants)
+.tinymem*
+.claude*
+.gemini*
+.qwen*
+
+# Task state
+tinyTasks.md

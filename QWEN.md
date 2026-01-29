@@ -30,6 +30,15 @@ cargo fmt
 
 **Note:** ringbuf is pinned to 0.2.8 due to API syntax requirements.
 
+## Release Command (Local gh)
+
+```bash
+# Build + package macOS/Windows/Linux and create GitHub release (prompts for commit message)
+tools/release.sh
+```
+
+Prereqs: Docker + `cross` for Linux builds, `xwin` + `lld-link` for Windows builds.
+
 ## Feature Flags
 
 - `debug` - Enables development features:
@@ -116,7 +125,7 @@ After completing each instruction or code modification, please verify that the f
 
 Ensure all three files contain consistent information about the project architecture, build commands, and critical constraints. Update any discrepancies based on `AGENT.md`.
 
-- Always bump the version recorded in `Cargo.toml` (and the `vxcleaner` entry in `Cargo.lock`) with any release-related commit, and keep the footer version text synchronized.
+- Always bump the version recorded in `Cargo.toml` (and the `vxcleaner` entry in `Cargo.lock`) with any release-related commit, and keep the footer version text synchronized (see `src/lib.rs` VERSION constant).
 - The UI now performs a GitHub release check, and proxy/MCP workflows must make sure the user sees the "update available" notification (footer label/button) when a newer release is detected.
 
 Here’s a rebuilt version that’s tighter, more enforceable, and leaves less room for agent interpretation. It reads as a control contract, not guidance.

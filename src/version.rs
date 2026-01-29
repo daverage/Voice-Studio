@@ -1,9 +1,11 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use semver::Version;
 use serde::Deserialize;
+use serde_json;
 use ureq;
 
 use nih_plug_vizia::vizia::prelude::{ContextProxy, Data};
@@ -131,16 +133,20 @@ fn notify_ui(proxy: Arc<Mutex<Option<ContextProxy>>>, state: VersionUiState) {
 }
 
 fn fetch_latest_release() -> anyhow::Result<RemoteRelease> {
-    let agent = ureq::agent();
-    let response = agent
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(5)))
+        .timeout_recv_response(Some(Duration::from_secs(5)))
+        .timeout_recv_body(Some(Duration::from_secs(5)))
+        .build()
+        .into();
+    let mut response = agent
         .get(GITHUB_RELEASE_ENDPOINT)
         .header("User-Agent", "VxCleaner Version Checker")
         .header("Accept", "application/vnd.github+json")
-        .timeout_connect(5_000)
-        .timeout(5_000)
         .call()?;
 
-    let release: GitHubRelease = response.into_json()?;
+    let body = response.body_mut().read_to_string()?;
+    let release: GitHubRelease = serde_json::from_str(&body)?;
     let parsed_version = normalize_tag(&release.tag_name)?;
     Ok(RemoteRelease {
         version: parsed_version,
