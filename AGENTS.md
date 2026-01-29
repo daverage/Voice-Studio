@@ -118,6 +118,7 @@ Ensure all three files contain consistent information about the project architec
 
 - Always bump the version recorded in `Cargo.toml` (and the `vxcleaner` entry in `Cargo.lock`) with any release-related commit, and keep the footer version text synchronized.
 - The UI now performs a GitHub release check, and proxy/MCP workflows must make sure the user sees the "update available" notification (footer label/button) when a newer release is detected.
+
 # TINYMEM CONTROL PROTOCOL
 
 ## Hard Enforcement Specification for Repository-Aware AI Agents
@@ -257,6 +258,7 @@ For complex, iterative tasks requiring verification (e.g., fixing failing tests)
 - **Recall**: On failure, tinyMem retrieves relevant memories and failure patterns.
 - **Repair**: tinyMem uses its internal LLM to apply code fixes based on context.
 - **Evidence**: Success is declared only if all evidence predicates pass.
+  - **Format Requirement**: Predicates MUST use the `type::content` format (e.g., `test_pass::go test ./...`, `file_exists::path/to/file`).
 
 **Safety Rules:**
 - Agents MUST provide `forbid_paths` for sensitive directories.

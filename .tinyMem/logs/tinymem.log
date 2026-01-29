@@ -1,42 +1,14 @@
-{"level":"info","ts":1769602866.118444,"caller":"tinymem/main.go:188","msg":"Checking health...","mode":"standalone"}
-{"level":"info","ts":1769602866.1185422,"caller":"tinymem/main.go:195","msg":"Database connectivity: OK"}
-{"level":"info","ts":1769602866.118565,"caller":"tinymem/main.go:204","msg":"Database query: OK"}
-{"level":"info","ts":1769602866.118579,"caller":"tinymem/main.go:230","msg":"Health check complete."}
-{"level":"info","ts":1769602866.1193652,"caller":"app/app.go:94","msg":"Database connection closed."}
-{"level":"info","ts":1769602874.395395,"caller":"tinymem/main.go:134","msg":"Starting MCP server"}
-{"level":"info","ts":1769614086.65838,"caller":"app/app.go:94","msg":"Database connection closed."}
-{"level":"info","ts":1769614098.800235,"caller":"app/app.go:94","msg":"Database connection closed."}
-{"level":"info","ts":1769614212.285024,"caller":"app/app.go:94","msg":"Database connection closed."}
-{"level":"info","ts":1769615071.593931,"caller":"tinymem/main.go:134","msg":"Starting MCP server"}
-{"level":"info","ts":1769619113.378807,"caller":"tinymem/main.go:134","msg":"Starting MCP server"}
-{"level":"info","ts":1769620460.008821,"caller":"app/app.go:94","msg":"Database connection closed."}
-{"level":"info","ts":1769620988.672353,"caller":"app/app.go:94","msg":"Database connection closed."}
-{"level":"info","ts":1769620994.025961,"caller":"app/app.go:94","msg":"Database connection closed."}
-{"level":"info","ts":1769621606.551738,"caller":"app/app.go:94","msg":"Database connection closed."}
-{"level":"info","ts":1769623570.4772859,"caller":"app/app.go:94","msg":"Database connection closed."}
-{"level":"info","ts":1769623576.9160378,"caller":"tinymem/main.go:134","msg":"Starting MCP server"}
-{"level":"info","ts":1769625233.006627,"caller":"app/app.go:94","msg":"Database connection closed."}
-{"level":"info","ts":1769678503.251971,"caller":"app/app.go:88","msg":"Database connection closed."}
-{"level":"info","ts":1769679309.662936,"caller":"tinymem/main.go:142","msg":"Starting MCP server"}
-{"level":"info","ts":1769683822.625878,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769683822.626086,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
-{"level":"info","ts":1769683822.874749,"caller":"tinymem/main.go:602","msg":"A new version of tinyMem is available: v0.1.11 (current: vv0.1.10). Download it from: https://github.com/daverage/tinymem/releases"}
-{"level":"info","ts":1769683857.3179789,"caller":"ralph/engine.go:49","msg":"Ralph loop iteration started","iteration":1,"task":"List source files to scope the code review."}
-{"level":"warn","ts":1769683857.391532,"caller":"ralph/engine.go:83","msg":"Ralph loop evidence check failed","iteration":1,"evidence":{"cmd_exit0":"error: command evidence is disabled by policy"}}
-{"level":"info","ts":1769683857.391634,"caller":"ralph/engine.go:95","msg":"Ralph loop performing recall","iteration":1}
-{"level":"warn","ts":1769683857.3916428,"caller":"ralph/engine.go:113","msg":"Ralph loop reached max iterations without success"}
-{"level":"info","ts":1769684273.176973,"caller":"ralph/engine.go:49","msg":"Ralph loop iteration started","iteration":1,"task":"Locate f0_scratch allocations for review tasks."}
-{"level":"warn","ts":1769684273.223209,"caller":"ralph/engine.go:83","msg":"Ralph loop evidence check failed","iteration":1,"evidence":{"cmd_exit0":"error: command evidence is disabled by policy"}}
-{"level":"info","ts":1769684273.223273,"caller":"ralph/engine.go:95","msg":"Ralph loop performing recall","iteration":1}
-{"level":"warn","ts":1769684273.223281,"caller":"ralph/engine.go:113","msg":"Ralph loop reached max iterations without success"}
-{"level":"info","ts":1769684494.0225081,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769684568.3411431,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769685297.282002,"caller":"ralph/engine.go:49","msg":"Ralph loop iteration started","iteration":1,"task":"Check ureq 3.x timeout API in local registry sources."}
-{"level":"error","ts":1769685297.282676,"caller":"ralph/engine.go:63","msg":"Ralph loop execution failed","iteration":1,"error":"command contains shell metacharacters but allow_shell is false","stacktrace":"github.com/daverage/tinymem/internal/ralph.(*Engine).ExecuteLoop\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/internal/ralph/engine.go:63\ngithub.com/daverage/tinymem/internal/server/mcp.(*Server).handleMemoryRalph\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/internal/server/mcp/server.go:454\ngithub.com/daverage/tinymem/internal/server/mcp.(*Server).handleToolCall\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/internal/server/mcp/server.go:436\ngithub.com/daverage/tinymem/internal/server/mcp.(*Server).handleRequest\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/internal/server/mcp/server.go:132\ngithub.com/daverage/tinymem/internal/server/mcp.(*Server).Start\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/internal/server/mcp/server.go:122\nmain.runMcpCmd\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/cmd/tinymem/main.go:145\nmain.main.newAppRunner.func4\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/cmd/tinymem/main.go:615\ngithub.com/spf13/cobra.(*Command).execute\n\t/Users/andrzejmarczewski/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1019\ngithub.com/spf13/cobra.(*Command).ExecuteC\n\t/Users/andrzejmarczewski/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1148\ngithub.com/spf13/cobra.(*Command).Execute\n\t/Users/andrzejmarczewski/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1071\nmain.main\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/cmd/tinymem/main.go:645\nruntime.main\n\t/opt/homebrew/Cellar/go/1.25.6/libexec/src/runtime/proc.go:285"}
-{"level":"info","ts":1769685306.095307,"caller":"ralph/engine.go:49","msg":"Ralph loop iteration started","iteration":1,"task":"Locate local cargo registry directories for ureq sources."}
-{"level":"warn","ts":1769685306.145005,"caller":"ralph/engine.go:83","msg":"Ralph loop evidence check failed","iteration":1,"evidence":{"cmd_exit0":"error: command evidence is disabled by policy"}}
-{"level":"info","ts":1769685306.145057,"caller":"ralph/engine.go:95","msg":"Ralph loop performing recall","iteration":1}
-{"level":"warn","ts":1769685306.1450639,"caller":"ralph/engine.go:113","msg":"Ralph loop reached max iterations without success"}
-{"level":"info","ts":1769685730.687634,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769685730.6878562,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
-{"level":"info","ts":1769685730.9819121,"caller":"tinymem/main.go:602","msg":"A new version of tinyMem is available: v0.1.13 (current: vv0.1.12). Download it from: https://github.com/daverage/tinymem/releases"}
+{"level":"info","ts":1769690387.940374,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
+{"level":"info","ts":1769690387.9433742,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
+{"level":"info","ts":1769690388.274111,"caller":"tinymem/main.go:602","msg":"A new version of tinyMem is available: v0.1.16 (current: vv0.1.15). Download it from: https://github.com/daverage/tinymem/releases"}
+{"level":"info","ts":1769690391.104038,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
+{"level":"info","ts":1769690391.108144,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
+{"level":"info","ts":1769690391.223917,"caller":"tinymem/main.go:602","msg":"A new version of tinyMem is available: v0.1.16 (current: vv0.1.15). Download it from: https://github.com/daverage/tinymem/releases"}
+{"level":"info","ts":1769690580.30884,"caller":"app/app.go:96","msg":"Database connection closed."}
+{"level":"info","ts":1769690775.7333262,"caller":"app/app.go:96","msg":"Database connection closed."}
+{"level":"info","ts":1769690793.691691,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
+{"level":"info","ts":1769690793.697991,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
+{"level":"info","ts":1769690794.083742,"caller":"tinymem/main.go:602","msg":"A new version of tinyMem is available: v0.1.17 (current: vv0.1.16). Download it from: https://github.com/daverage/tinymem/releases"}
+{"level":"info","ts":1769690797.692523,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
+{"level":"info","ts":1769690797.694609,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
+{"level":"info","ts":1769690797.830552,"caller":"tinymem/main.go:602","msg":"A new version of tinyMem is available: v0.1.17 (current: vv0.1.16). Download it from: https://github.com/daverage/tinymem/releases"}

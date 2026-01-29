@@ -122,6 +122,7 @@ Ensure all three files contain consistent information about the project architec
 Here’s a rebuilt version that’s tighter, more enforceable, and leaves less room for agent interpretation. It reads as a control contract, not guidance.
 
 ---
+
 # TINYMEM CONTROL PROTOCOL
 
 ## Hard Enforcement Specification for Repository-Aware AI Agents
@@ -261,6 +262,7 @@ For complex, iterative tasks requiring verification (e.g., fixing failing tests)
 - **Recall**: On failure, tinyMem retrieves relevant memories and failure patterns.
 - **Repair**: tinyMem uses its internal LLM to apply code fixes based on context.
 - **Evidence**: Success is declared only if all evidence predicates pass.
+  - **Format Requirement**: Predicates MUST use the `type::content` format (e.g., `test_pass::go test ./...`, `file_exists::path/to/file`).
 
 **Safety Rules:**
 - Agents MUST provide `forbid_paths` for sensitive directories.
