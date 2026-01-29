@@ -14,3 +14,10 @@
 {"level":"info","ts":1769690797.830552,"caller":"tinymem/main.go:602","msg":"A new version of tinyMem is available: v0.1.17 (current: vv0.1.16). Download it from: https://github.com/daverage/tinymem/releases"}
 {"level":"info","ts":1769690891.797428,"caller":"ralph/engine.go:49","msg":"Ralph loop iteration started","iteration":1,"task":"Run Ralph loop as requested before planning/doc updates"}
 {"level":"info","ts":1769690891.96371,"caller":"ralph/engine.go:75","msg":"Ralph loop success: all evidence passed","iteration":1}
+{"level":"info","ts":1769702858.081259,"caller":"app/app.go:96","msg":"Database connection closed."}
+{"level":"info","ts":1769702865.148159,"caller":"app/app.go:96","msg":"Database connection closed."}
+{"level":"info","ts":1769704053.97365,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
+{"level":"info","ts":1769704053.977748,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
+{"level":"info","ts":1769706016.946948,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
+{"level":"info","ts":1769706016.9521642,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
+{"level":"info","ts":1769706017.291596,"caller":"tinymem/main.go:603","msg":"A new version of tinyMem is available: v0.1.22 (current: vv0.1.21). Download it from: https://github.com/daverage/tinymem/releases"}

@@ -22,6 +22,7 @@ pub struct VersionUiState {
     pub detail: String,
     pub status: VersionStatus,
     pub release_url: Option<String>,
+    pub latest_version: Option<String>,
 }
 
 impl VersionUiState {
@@ -32,6 +33,7 @@ impl VersionUiState {
             detail: "Checking GitHub for the latest release".into(),
             status: VersionStatus::Checking,
             release_url: None,
+            latest_version: None,
         }
     }
 
@@ -42,6 +44,7 @@ impl VersionUiState {
             detail: format!("Latest release: {} ({})", release.version, release.tag),
             status: VersionStatus::UpToDate,
             release_url: None,
+            latest_version: Some(release.version.to_string()),
         }
     }
 
@@ -52,6 +55,7 @@ impl VersionUiState {
             detail: format!("Newest release: {} ({})", release.version, release.tag),
             status: VersionStatus::UpdateAvailable,
             release_url: Some(release.url.clone()),
+            latest_version: Some(release.version.to_string()),
         }
     }
 
@@ -62,6 +66,7 @@ impl VersionUiState {
             detail: message.to_string(),
             status: VersionStatus::Error,
             release_url: None,
+            latest_version: None,
         }
     }
 }
