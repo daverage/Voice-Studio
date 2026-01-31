@@ -1,123 +1,39 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides global guidance for any agent working in the Voice Studio (VxCleaner) repository.
 
-## Project Overview
+## Repository snapshot
+- Package version: `vxcleaner` 0.6.0 (`Cargo.toml`, `src/lib.rs::VERSION`).
+- Deterministic DSP pipeline for speech restoration; no neural inference path exists in this repo.
 
-Voice Studio (VxCleaner) is a professional vocal restoration and enhancement VST3/CLAP audio plugin written in Rust using the `nih_plug` framework with a `nih_plug_vizia` GUI.
+## Build & release process
+- Standard builds: `cargo build`, `cargo build --release`, `cargo nih-plug bundle vxcleaner --release`, and the debug variant (`--features debug`).
+- Release automation lives in `tools/release.sh`; it bundles macOS/Windows/Linux, zips each bundle, and creates a GitHub release (`v0.6.0`). Set `SKIP_LINUX=1` when Docker/cross is unavailable.
+- Windows bundles require `xwin`, `clang-cl`, `lld-link`, `llvm-lib`. Linux bundles require Docker with `cross` plus a sysroot path for `pkg-config`.
 
-## Build Commands
+## Modes & UI
+- Simple mode exposes Clean, Enhance, Control macros that drive the Clean & Repair, Shape & Polish, and dynamics stacks.
+- Advanced mode exposes every slider (rumble, hiss, static noise, noise reduction, de-verb, breath control, proximity, clarity, de-ess, leveler, gain) with a Quality meter beneath the noise controls.
+- The UI code lives in `src/ui` (layout, advanced, simple, components, meters, state) and draws meter state from `src/meters.rs`.
 
-```bash
-# Build plugin (debug)
-cargo build
+## Web & help assets
+- Marketing page: `web/index.html`. It now narrates the deterministic workflow, adds a Modes section with the assets from `web/assets/icons/simple.png` and `web/assets/icons/advanced.png`, and links to the `v0.6.0` release.
+- Help page: `web/help.html` documents the macros, sliders, and chains, reuses the same mode assets, and reports `VxCleaner v0.6.0` in the footer.
 
-# Build plugin (release)
-cargo build --release
+## Documentation housekeeping
+- Core docs live in `README.md`, `docs/`, `docs/agents/`, AGENT contracts, and the LLM guidance files (`CLAUDE.md`, `GEMINI.md`, `QWEN.md`, `AGENT_CONTRACT.md`).
+- Historical/deadlined writeups (UI fix/refactor plans, NEXT_STEPS, aggregation tables, dead code notes) now live under `docs/archive/`. The root keeps only working documentation, LLM guidance, and README-level references.
+- Always sync `CLAUDE.md`, `GEMINI.md`, `QWEN.md`, and `AGENTS.md` whenever the architecture, release flow, or constraints change.
+- Ensure the UI shows the “update available” footer notification when a newer GitHub release exists, as a side effect of the release checker built into the UI footer.
 
-# Bundle VST3/CLAP plugins (Production - no logging)
-cargo nih-plug bundle vxcleaner --release
+## Agent instructions
+- Before touching repository state, run a TinyMem recall (`memory_query`/`memory_recent`) and read `tinyTasks.md` (it is the single source of truth for task status).
+- Update `tinyTasks.md` with every meaningful milestone (especially documentation work).
+- After release-related edits, bump `Cargo.toml`/`src/lib.rs`, sync `Cargo.lock`’s `vxcleaner` version, and refresh any footer text or help page version references.
+- Follow the `AGENT_CONTRACT.md` workflow (hard gate for memory, task checks, durable memory writeback, self-validation checklist).
 
-# Bundle with Debug features (enables logging and UI Log button)
-cargo nih-plug bundle vxcleaner --release --features debug
-
-# Run tests
-cargo test
-
-# Format code
-cargo fmt
-```
-
-**Note:** ringbuf is pinned to 0.2.8 due to API syntax requirements.
-
-## Feature Flags
-
-- `debug` - Enables development features:
-  - Centralized logging to `/tmp/voice_studio.log`
-  - "Log" button in UI footer to open the log file
-  - "Edit CSS" button to open `src/ui.css` in your system's default text editor
-  - "Reload CSS" button to reload styles from disk in real-time
-
-**DSP Note**: All denoising is handled by the deterministic DSP pipeline; there is no neural inference path in this repository.
-
-## Architecture
-
-### Audio Processing Pipeline
-
-```
-Input → SpeechHpf → Analysis → EarlyReflection → Denoiser → PlosiveSoftener → BreathReducer → Deverber → Shaping → Dynamics → Output
-```
-
-- Spectral denoiser with adaptive magnitude gating (pure DSP)
-- Automatic plosive/thump protection
-- Confidence-weighted breath softening
-- Late reverb reduction
-
-**Shaping stage** (`src/dsp/proximity.rs`, `src/dsp/clarity.rs`):
-- Proximity: low-end shaping
-- Clarity: high-frequency enhancement
-
-**Dynamics stage** (`src/dsp/de_esser.rs`, `src/dsp/compressor.rs`, `src/dsp/limiter.rs`):
-- De-esser: sibilance reduction
-- Leveler: linked stereo compression
-- Limiter: output safety limiting
-
-## Live CSS Editing (Debug Mode)
-
-When building with `--features debug`, the UI includes live CSS editing tools:
-
-1. **Edit CSS** button - Opens the CSS file in your system's default text editor
-2. **Reload CSS** button - Reloads the stylesheet from disk without restarting the plugin
-
-**CSS File Location:**
-
-The CSS file is created in `themes/default/ui.css` relative to the VST binary location:
-
-- **macOS VST3:** `/Library/Audio/Plug-Ins/VST3/vxcleaner.vst3/Contents/MacOS/themes/default/ui.css`
-- **macOS CLAP:** `/Library/Audio/Plug-Ins/CLAP/vxcleaner.clap/Contents/MacOS/themes/default/ui.css`
-- **Linux VST3:** `~/.vst3/vxcleaner.vst3/x86_64-linux/themes/default/ui.css`
-- **Windows VST3:** `C:\Program Files\Common Files\VST3\vxcleaner.vst3\Contents\x86_64-win\themes\default\ui.css`
-
-**Workflow:**
-1. Build with debug features: `cargo nih-plug bundle vxcleaner --release --features debug`
-2. Load the plugin in your DAW
-3. Click "Edit CSS" to open the stylesheet (creates file if it doesn't exist)
-4. Make changes and save the file
-5. Click "Reload CSS" to see changes instantly in the plugin UI
-6. Check the log file (`/tmp/voice_studio.log`) for CSS editor debug messages
-
-**Note:** All sizing, spacing, colors, and layout properties are in the CSS file. No hardcoded `Pixels()` values remain in `src/ui.rs`.
-
-## Critical Constraints
-
-### Audio Thread Rules (MUST follow)
-
-- **No memory allocation** in `process()` or any audio-thread code
-- **No mutexes, locks, or blocking operations** in the audio thread
-- DSP state must be pre-allocated in `initialize()` or constructors
-- Use atomic floats (relaxed ordering) for meter data shared with UI
-
-### Safety Contract
-
-- All divisions must include epsilon guards (`1e-12`)
-- No `unwrap()` or `expect()` in the audio thread path
-- `catch_unwind` must wrap all FFI entry points
-
-### Global Reset
-
-The plugin features a global reset button in the UI header that clears all DSP history and returns parameters to default values.
-
-## Instructions for AI Assistants
-
-After completing each instruction or code modification, please verify that the following files remain up to date and relevant:
-- `CLAUDE.md` (this file)
-- `GEMINI.md`
-- `QWEN.md`
-
-Ensure all three files contain consistent information about the project architecture, build commands, and critical constraints. Update any discrepancies based on `AGENT.md`.
-
-- Always bump the version recorded in `Cargo.toml` (and the `vxcleaner` entry in `Cargo.lock`) with any release-related commit, and keep the footer version text synchronized.
-- The UI now performs a GitHub release check, and proxy/MCP workflows must make sure the user sees the "update available" notification (footer label/button) when a newer release is detected.
+- No destructive commands (`git reset --hard`, `rm -rf`) unless explicitly requested.
+- Do not revert changes you did not make without asking the user.
 
 # TINYMEM AGENT CONTRACT
 

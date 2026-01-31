@@ -1,115 +1,66 @@
-# CLAUDE.md
+# QWEN.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Qwen (qwen.ai) when working with code in this repository.
+
+## Current Version
+- `vxcleaner` package version: `0.6.0` (matches `Cargo.toml` and `src/lib.rs::VERSION`).
 
 ## Project Overview
+Voice Studio (VxCleaner) is a deterministic vocal restoration and enhancement VST3/CLAP plugin written in Rust with `nih_plug` + `nih_plug_vizia`. There is no neural inference path; every stage is audio-thread safe, pre-allocated, and designed for real speech in real rooms.
 
-Voice Studio (VxCleaner) is a professional vocal restoration and enhancement VST3/CLAP audio plugin written in Rust using the `nih_plug` framework with a `nih_plug_vizia` GUI.
+## Audio Processing Pipeline
+```
+Input → SpeechHpf → Analysis → EarlyReflection → Static Noise Learn → Noise Reduction → PlosiveSoftener → BreathReducer → Deverber → Proximity/Clarity → Dynamics (De-esser → Leveler → Limiter) → Output
+```
+- Noise cleanup is driven by a learned static profile, adaptive spectral gating, and a Quality meter below the noise controls.
+- Shaping and dynamics stages (proximity, clarity, de-esser, leveler, limiter) run deterministically in order with smoothing and epsilon guards.
+
+## Modes & UI
+- **Simple macros:** Clean, Enhance, Control map to macro adjustments on the Clean & Repair, Shape & Polish, and dynamics stages. These are the only controls in Simple mode.
+- **Advanced sliders:** Clean & Repair column (rumble, hiss, static noise, noise reduction, de-verb, breath control) and Shape & Polish column (proximity, clarity, de-ess, leveler) expose every DSP stage.
+- The UI uses `src/ui` submodules (`layout`, `advanced`, `simple`, `components`, `meters`, `state`) and `src/meters.rs` for shared meter state.
 
 ## Build Commands
-
 ```bash
-# Build plugin (debug)
 cargo build
-
-# Build plugin (release)
 cargo build --release
-
-# Bundle VST3/CLAP plugins (Production - no logging)
 cargo nih-plug bundle vxcleaner --release
-
-# Bundle with Debug features (enables logging and UI Log button)
 cargo nih-plug bundle vxcleaner --release --features debug
-
-# Run tests
 cargo test
-
-# Format code
 cargo fmt
 ```
 
-**Note:** ringbuf is pinned to 0.2.8 due to API syntax requirements.
-
-## Release Command (Local gh)
-
+## Release Command
 ```bash
-# Build + package macOS/Windows/Linux and create GitHub release (prompts for commit message)
-tools/release.sh
+SKIP_LINUX=1 ./tools/release.sh   # macOS + Windows only (use when Docker/cross fails)
+./tools/release.sh               # full release (requires Docker/cross and xwin)
 ```
-
-Prereqs: Docker + `cross` for Linux builds, `xwin` + `lld-link` for Windows builds.
+- `tools/release.sh` prompts for a commit message, updates `Cargo.toml`/`src/lib.rs`, bundles VST3/CLAP, zips per OS, and creates a GitHub release (`v0.6.0`).
+- Windows bundles rely on `xwin`, `clang-cl`, `lld-link`, `llvm-lib`. Linux bundles expect a Dockerized `cross` session with `pkg-config` pointing into the sysroot.
 
 ## Feature Flags
+- `debug`: enables `/tmp/voice_studio.log` logging, the footer Log button, Edit/Reload CSS helpers, and the live stylesheet workflow.
 
-- `debug` - Enables development features:
-  - Centralized logging to `/tmp/voice_studio.log`
-  - "Log" button in UI footer to open the log file
-  - "Edit CSS" button to open `src/ui.css` in your system's default text editor
-  - "Reload CSS" button to reload styles from disk in real-time
+## Web & Help
+- The marketing page (`web/index.html`) now highlights the Simple vs Advanced modes side-by-side and links straight to `https://github.com/daverage/Voice-Studio/releases/tag/v0.6.0`.
+- The help page (`web/help.html`) documents the macros, sliders, noise removal flow, and reuses `web/assets/icons/simple.png` + `web/assets/icons/advanced.png`.
+- Keep the `web/assets/icons` directory in sync with any UI mode artwork updates.
 
-**DSP Note**: All denoising is handled by the deterministic DSP pipeline; there is no neural inference path in this repository.
-
-## Architecture
-
-### Audio Processing Pipeline
-
-```
-Input → SpeechHpf → Analysis → EarlyReflection → Denoiser → PlosiveSoftener → BreathReducer → Deverber → Shaping → Dynamics → Output
-```
-
-- Spectral denoiser with adaptive magnitude gating (pure DSP)
-- Automatic plosive/thump protection
-- Confidence-weighted breath softening
-- Late reverb reduction
-
-**Shaping stage** (`src/dsp/proximity.rs`, `src/dsp/clarity.rs`):
-- Proximity: low-end shaping
-- Clarity: high-frequency enhancement
-
-**Dynamics stage** (`src/dsp/de_esser.rs`, `src/dsp/compressor.rs`, `src/dsp/limiter.rs`):
-- De-esser: sibilance reduction
-- Leveler: linked stereo compression
-- Limiter: output safety limiting
-
-## UI Module Structure (`src/ui/`)
-
-The UI is modularized to improve maintainability:
-- `mod.rs`: Main entry point and re-exports.
-- `layout.rs`: Top-level structure (header, body, footer).
-- `state.rs`: Data model, events, and synchronization logic.
-- `components.rs`: Reusable UI builders (sliders, dials, buttons).
-- `advanced.rs`: Advanced mode panels and tabs.
-- `simple.rs`: Simple mode macro controls.
-- `meters.rs`: Custom Vizia widgets for metering.
-
-**Note:** All metering data storage is unified in `src/meters.rs`. UI widgets in `src/ui/meters.rs` reference this shared state.
-
-## Live CSS Editing (Debug Mode)
-
-When building with `--features debug`, the UI includes live CSS editing tools. Styles are loaded from `src/ui.css`.
-
-**Vizia CSS Compatibility Notes:**
-- Use `child-left`, `child-right`, `child-top`, `child-bottom` instead of `padding`.
-- Use `child-space: 1s` for centering instead of `text-align: center`.
-- Properties like `cursor`, `transform`, and per-side borders are NOT supported by the Vizia engine used here.
-- Use unitless values for `font-size` (e.g., `font-size: 14;`).
+## Documentation Notes
+- Core documentation lives in `README.md`, `docs/`, `docs/agents/`, and this file. Historical planning docs (UI fix/refactor reports, NEXT_STEPS, CSS styling notes, etc.) now reside under `docs/archive/`.
+- Always keep `CLAUDE.md`, `GEMINI.md`, and `QWEN.md` synchronized with any changes to architecture, build steps, or release instructions.
 
 ## Critical Constraints
+### Audio thread rules
+- No heap allocation, mutexes, blocking, or panics in `process()`.
+- Use atomic floats (relaxed) for meter/UI sharing, pre-allocate DSP state in `initialize()`.
 
-### Audio Thread Rules (MUST follow)
+### Safety contract
+- Every division uses a `1e-12` guard.
+- No `unwrap()`/`expect()` on the audio thread path.
+- Wrap all FFI exports with `catch_unwind`.
 
-- **No memory allocation** in `process()` or any audio-thread code.
-- **No mutexes, locks, or blocking operations** in the audio thread.
-- Use atomic floats (relaxed ordering) for meter data shared with UI.
-
-### Safety Contract
-
-- All divisions must include epsilon guards (`1e-12`).
-- No `unwrap()` or `expect()` in the audio thread path.
-- `catch_unwind` must wrap all FFI entry points.
-
-## Instructions for AI Assistants
-
-- Always bump the version in `Cargo.toml` and `src/lib.rs` (VERSION constant) with any release.
-- Ensure `CLAUDE.md`, `GEMINI.md`, and `QWEN.md` remain consistent.
-- **TINYMEM AGENT CONTRACT**: You MUST follow the protocol in `AGENT_CONTRACT.md` for all repository operations.
+## Agent instructions
+- Start every repository change by invoking `memory_query`/`memory_recent`, reading `tinyTasks.md`, and following the custom plan/protocol in `AGENT_CONTRACT.md`.
+- Report progress by updating `tinyTasks.md` (top-level tasks, substasks). Track documentation cleanup steps deliberately.
+- After release-related edits, bump `Cargo.toml`/`src/lib.rs` version, keep `Cargo.lock` `vxcleaner` entry in sync, and update any footer text that shows the version number.

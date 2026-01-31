@@ -1,97 +1,92 @@
 # Voice Studio (VxCleaner)
 
-Professional vocal restoration and enhancement suite for spoken voice.
+**Version:** 0.6.0 — deterministic vocal restoration for messy rooms.
 
 ## Overview
-
-Voice Studio is a professional vocal restoration and enhancement suite built for podcasting, voice-over, dialogue, and broadcast material.
-
-It focuses on improving clarity, consistency, and intelligibility without turning natural speech into something processed or artificial. The goal isn't just noise removal—it's making voice easier to listen to, easier to mix, and ready for delivery across platforms.
+Voice Studio (VxCleaner) is a professional vocal restoration and enhancement suite built for podcasting, voice-over, dialogue, and broadcast deliveries. The plugin focuses on clarity, consistency, and intelligibility without introducing neural artifacts; every stage is a deterministic DSP process tuned for real speech.
 
 ## Architecture
+The pipeline prioritizes safety, transparency, and low latency. Every stage runs on the audio thread with pre-allocated state and defensive guards.
 
-Voice Studio is built around a tightly integrated DSP restoration pipeline that emphasizes deterministic behavior, low latency, and professional speech restoration without relying on neural models.
+### Audio Processing Pipeline
+1. **SpeechHpf (Hygiene)** – audio routing begins with a conversational high-pass filter (about 90 Hz).
+2. **Speech Analysis / Confidence** – the chain continuously tracks speech activity and spectral shape.
+3. **EarlyReflection Suppressor** – early reflections and desk/room colorations are attenuated conservatively.
+4. **Static Noise Learn & Removal** – deterministic subtraction of captured room tone and hum.
+5. **Noise Reduction (Spectral Gating)** – spectral gating with magnitude-adaptive envelopes keeps speech intact.
+6. **Plosive Softening** – automatic softening of thumps and plosive hits.
+7. **Breath Management** – confidence-weighted breath reduction keeps inhales but tames exhale noise.
+8. **Deverber / Shaping** – late reverb energy is peeled back and shaping components restore body/air.
+9. **Proximity & Clarity Shaping** – separate low-end warmth and high-frequency articulation controls.
+10. **Dynamics Chain** – De-esser, Leveler (linked stereo compressor), and Limiter protect the downstream buss.
+11. **Output Gain + Delivery Guardrails** – final level trimming with optional delivery presets (YouTube, Spotify, Broadcast).
 
-### DSP Pipeline
+## Modes
+- **Simple Mode macros** (Clean, Enhance, Control) map a handful of intent-driven buttons to precise adjustments across the entire DSP stack, letting you jump into a mix without hunting sliders.
+- **Advanced Mode sliders** unlock every stage (Clean & Repair on the left column, Shape & Polish on the right, dynamics in the footer). The UI highlights noise learn quality, breath control, shaping, and limiting with responsive meters.
 
-1. **Hygiene**: 90Hz High-Pass Filter (`SpeechHpf`)
-2. **Analysis**: Speech Confidence Sidechain
-3. **Static Noise Removal**: Spectral subtraction of learned stationary noise (`NoiseLearnRemove`)
-4. **Hiss/Rumble Cleanup**: Dedicated HPF and HF Shelf (`HissRumble`)
-5. **Early Reflection**: Micro-deverb for desk/wall coloration
-6. **Denoiser**: Hybrid Spectral + Neural suppression
-7. **Plosive Softener**: Automatic thump protection
-8. **Breath Reducer**: Confidence-weighted breath softening
-9. **Deverber**: Late reverb tail reduction
-10. **Shaping**: Proximity (body) and Clarity (air)
-11. **Dynamics**: De-esser, Leveler, and Limiter
-
-## Features
-
-- **Simple Mode**: Intent-based macro controls (Distance, Clarity, Consistency) for rapid results.
-- **Advanced Mode**: Granular access to every stage of the restoration and dynamics chain.
-- **Factory Presets**: Multiple starting points for common scenarios including Podcast, Voiceover, Mud Free, and Broadcast presets.
-- **Global Reset**: Instantly clear all DSP state and return to defaults.
-- **Delivery Presets**: Built-in loudness targeting for YouTube, Spotify, and Broadcast standards.
+The plugin also exposes a dedicated **Quality meter** beneath the noise controls to show how much steady noise is being tracked—keep it near mid-scale to balance suppression vs. artifacts.
 
 ## Controls
-
 ### Clean & Repair
-*   **Noise Reduction**: Reduces steady background noise.
-*   **Rumble**: Cuts low-frequency mechanical noise (20–120 Hz).
-*   **Hiss**: Cuts high-frequency broadband noise (>8 kHz).
-*   **Static Noise**: Learns and removes stationary noise (room tone) even during silence.
-*   **De-Verb**: Reduces room reflections.
-*   **Breath Control**: Attenuates breaths.
+* **Rumble** – HPF-based control for 20–120 Hz energy.
+* **Hiss** – HF attenuation above ~8 kHz without dulling clarity.
+* **Static Noise** – learn and clear constant room tone via the Learn/Clear buttons.
+* **Noise Reduction** – adaptive spectral gating blends aggressively with smoothing.
+* **De-Verb** – early reflection suppression.
+* **Breath Control** – confidence-weighted breath softening between words.
 
-### Polish & Enhance
-*   **Proximity**: Restores body/warmth (120–300 Hz).
-*   **Clarity**: Removes low-mid mud (180–400 Hz).
-*   **De-Ess**: Controls sibilance.
-*   **Leveler**: Smooths loudness.
+### Shape & Polish
+* **Proximity** – restores low-frequency warmth for close-mic or distant recordings.
+* **Clarity** – high-mid sculpting that reduces mud and brings articulation forward.
+* **De-Ess** – maps to a sibilance limiter that acts when conditions warrant.
+* **Leveler** – linked stereo compressor for transparent loudness smoothing.
+* **Gain** – output trim before the limiter, useful for delivery matching.
 
-## Building
-
+## Build & Release
 ### Prerequisites
-- Rust 1.70+
-- `cargo-nih-plug` (install with `cargo install cargo-nih-plug`)
+- Rust 1.70+ toolchain with `cargo` and `cargo-nih-plug` installed (`cargo install cargo-nih-plug`).
+- For Windows bundles: `xwin` (managed via `xwin --accept-license splat --output xwin`) plus LLVM tools (`clang-cl`, `lld-link`, `llvm-lib`).
+- For Linux bundles: Docker + `cross` to provide a complete sysroot with `pkg-config`.
+- The `tools/release.sh` script wraps the per-platform builds, bundling, and GitHub release creation (prompting for commit message).
 
-### Commands
-
+### Common Commands
 ```bash
-# Bundle VST3/CLAP plugins (Production)
+# Local builds
+cargo build
+cargo build --release
+
+# Bundle for VST3/CLAP (production)
 cargo nih-plug bundle vxcleaner --release
 
-# Bundle with Debug features (Enables logging and UI Log button)
+# Bundle with debug features (logging + live CSS reloading)
 cargo nih-plug bundle vxcleaner --release --features debug
 
-# Run tests
-cargo test
+# Run the release pipeline (macOS + Windows + optional Linux via cross)
+SKIP_LINUX=1 ./tools/release.sh # use when Linux containers are unavailable
+./tools/release.sh             # full release (requires Docker + cross + xwin)
 ```
 
 ## Feature Flags
+- `debug`: toggles centralized logging (`/tmp/voice_studio.log`) plus UI helpers:
+  - Footer **Log** button opens the log file.
+  - **Edit CSS** opens `src/ui.css` in your default editor and writes it to the bundle.
+  - **Reload CSS** reloads the stylesheet at runtime while the plugin is open.
 
-- **debug**: Enables centralized logging to `/tmp/voice_studio.log` and shows the "Log" button in the plugin footer.
+## Web & Help Resources
+- **Marketing page**: `web/index.html` highlights macOS + Windows bundling, explains the deterministic workflow, and now surfaces both macro (simple) and slider (advanced) modes side-by-side with the mode artwork stored at `web/assets/icons/simple.png` and `web/assets/icons/advanced.png`.
+- **In-plugin help page**: `web/help.html` mirrors the noise-removal workflow, macro intent, and slider documentation plus a mode illustration section that reuses the advanced/simple imagery.
+- Keep both files synchronized whenever UI copy, macros, or version numbers change; the help footer now reports `VxCleaner v0.6.0` and the download CTA points to `https://github.com/daverage/Voice-Studio/releases/tag/v0.6.0`.
 
-## License
+## Documentation housekeeping
+- Core references live in `README.md`, the `docs/` folder (release/versioning/publishing specs), and the `docs/agents/` instructions (`CLAUDE.md`, `GEMINI.md`, `QWEN.md`, plus `AGENT_CONTRACT.md`).
+- Historical writeups and plans (UI fix/refactor guidance, NEXT_STEPS, CSS styling notes, etc.) now sit under `docs/archive/` so the root contains nothing but working documentation and LLM guidance.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Agent governance
+- Follow the `AGENT_CONTRACT.md` protocol before touching repository state: memory recall, task queries (`tinyTasks.md`), and the finish-time checklist.
+- The `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `QWEN.md` files describe the same architecture/build instructions/glossary; keep them synchronized when any release-related detail changes.
+- Minor web assets (mode icons in `web/assets/icons/`) power the help and marketing pages, so keep those files in sync with any visual updates.
 
-## Acknowledgments
-
-- Built with the [nih-plug](https://github.com/robbert-vdh/nih-plug) framework.
-- UI built with [vizia](https://github.com/vizia/vizia).
-
-
-## Setting Up Agents for MCP Usage
-
-When using tinyMem as an MCP server for AI agents, ensure that your agents follow the MANDATORY TINYMEM CONTROL PROTOCOL.
-
-Include the contract content from [AGENT_CONTRACT.md](AGENT_CONTRACT.md) in your agent's system prompt to ensure proper interaction with tinyMem.
-
-## Setting Up Agents for MCP Usage
-
-When using tinyMem as an MCP server for AI agents, ensure that your agents follow the MANDATORY TINYMEM CONTROL PROTOCOL.
-
-Include the contract content from [docs/agents/AGENT_CONTRACT.md](docs/agents/AGENT_CONTRACT.md) in your agent's system prompt to ensure proper interaction with tinyMem.
-
+## License & Acknowledgments
+- Licensed under MIT; see [LICENSE](LICENSE).
+- Built with [nih-plug](https://github.com/robbert-vdh/nih-plug) and [vizia](https://github.com/vizia/vizia).

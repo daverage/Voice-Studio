@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>VxCleaner Help</title>
+        <style>
+            body {
+                font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+                background-color: #0f172a;
+                color: #e2e8f0;
+                margin: 0;
+                padding: 20px;
+                line-height: 1.6;
+            }
+            .container {
+                max-width: 900px;
+                margin: 0 auto;
+                background-color: #1e293b;
+                padding: 30px;
+                border-radius: 8px;
+            }
+            .header {
+                display: flex;
+                align-items: center;
+                margin-bottom: 30px;
+                padding-bottom: 20px;
+                border-bottom: 1px solid #334155;
+            }
+            .logo {
+                width: 60px;
+                height: 60px;
+                margin-right: 20px;
+            }
+            h1 {
+                color: #ffffff;
+                font-size: 24px;
+                margin: 0;
+            }
+            h2 {
+                color: #60a5fa;
+                border-bottom: 1px solid #334155;
+                padding-bottom: 5px;
+                margin-top: 32px;
+            }
+            h3 {
+                color: #93c5fd;
+                margin-top: 22px;
+            }
+            .section {
+                margin-bottom: 28px;
+            }
+            .control-group {
+                background-color: #334155;
+                padding: 15px;
+                border-radius: 6px;
+                margin: 12px 0;
+            }
+            .control-name {
+                font-weight: bold;
+                color: #bfdbfe;
+            }
+            .highlight {
+                background-color: #1e293b;
+                padding: 2px 6px;
+                border-radius: 4px;
+                font-weight: 500;
+            }
+            ul {
+                padding-left: 20px;
+            }
+            li {
+                margin-bottom: 8px;
+            }
+            .audio-chain {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                margin: 16px 0;
+            }
+            .chain-step {
+                background-color: #334155;
+                padding: 10px 15px;
+                border-radius: 4px;
+                display: flex;
+                align-items: center;
+            }
+            .chain-step-number {
+                background-color: #1d4ed8;
+                color: white;
+                width: 24px;
+                height: 24px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin-right: 10px;
+                flex-shrink: 0;
+            }
+            .modes-preview {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 20px;
+                justify-content: center;
+                margin-top: 20px;
+            }
+
+            .mode-card {
+                background-color: #152337;
+                border: 1px solid #475569;
+                border-radius: 10px;
+                padding: 16px;
+                width: 220px;
+                text-align: center;
+            }
+
+            .mode-card img {
+                width: 76px;
+                height: 76px;
+                margin-bottom: 12px;
+                object-fit: cover;
+            }
+
+            .mode-card h3 {
+                margin: 8px 0 6px;
+                color: #60a5fa;
+            }
+
+            .mode-card p {
+                margin: 0;
+                color: #cbd5e1;
+                font-size: 0.9rem;
+            }
+            .footer {
+                margin-top: 40px;
+                padding-top: 20px;
+                border-top: 1px solid #334155;
+                text-align: center;
+                color: #94a3b8;
+                font-size: 14px;
+            }
+        </style>
+    </head>
+
+    <body>
+        <div class="container">
+            <div class="header">
+                <img
+                    src="assets/icons/1024x1024.png"
+                    alt="VxCleaner Logo"
+                    class="logo"
+                    onerror="this.style.display = 'none'"
+                />
+                <h1>VxCleaner Help</h1>
+            </div>
+
+            <div class="section">
+                <h2>About VxCleaner</h2>
+                <p>
+                    VxCleaner is a professional vocal restoration and enhancement plugin built for dialogue, voice-over, and broadcast work.
+                    The DSP chain is deterministic, real-time, and tuned specifically for speech so you can clean recordings without kybashing their tonal balance.
+                </p>
+                <p>
+                    The plugin combines a fixed signal path with perceptual safety limits, automatic protection, and tight parameter smoothing so that you make musical edits without needing to become an audio engineer.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>Simple Mode Macros</h2>
+                <div class="control-group">
+                    <div class="control-name">CLEAN</div>
+                    <p>
+                        Boosts the cleanup stage. It raises <span class="highlight">Rumble</span>, <span class="highlight">Hiss</span>, the adaptive <span class="highlight">Noise Reduction</span> gate, and the <span class="highlight">Static Noise</span> capture so room tone is swept away first.
+                    </p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">ENHANCE</div>
+                    <p>
+                        Leans on the shaping stage ( <span class="highlight">Proximity</span> + <span class="highlight">Clarity</span>) to give the voice more body and articulation while remaining natural.
+                    </p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">CONTROL</div>
+                    <p>
+                        Commands the dynamics/damping stage. It raises <span class="highlight">De-Ess</span> and <span class="highlight">Leveler</span> activity and finally nudges <span class="highlight">Output Gain</span> so loudness stays even.
+                    </p>
+                </div>
+                <p>
+                    The macros translate your fast, simple moves into precise multi-slider changes under the hood. You can mix simple (macro) mode with advanced pulls—every slider still responds when you switch tabs.
+                </p>
+                <div class="modes-preview">
+                    <article class="mode-card">
+                        <img
+                            src="assets/icons/simple.png"
+                            alt="Simple mode icon"
+                        />
+                        <h3>Simple Mode</h3>
+                        <p>Clean/Enhance/Control let you move across the noise, shaping, and dynamics stacks in a single tap.</p>
+                    </article>
+                    <article class="mode-card">
+                        <img
+                            src="assets/icons/advanced.png"
+                            alt="Advanced mode icon"
+                        />
+                        <h3>Advanced Mode</h3>
+                        <p>Full Clean &amp; Repair + Shape &amp; Polish sliders unlock every DSP stage, and the Quality meter watches noise tracking.</p>
+                    </article>
+                </div>
+                <p>
+                    Switching between modes keeps all state synchronized: macro presses adjust the sliders and every slider touch updates the macros, so you can refine or stay fast.
+                </p>
+            </div>
+
+            <div class="section">
+                <h2>Noise Removal Tool</h2>
+                <div class="control-group">
+                    <div class="control-name">Noise Reduction + Static Noise</div>
+                    <p>
+                        The adaptive denoiser continuously analyzes the spectral noise floor, performs speech detection, and applies a hybrid Wiener-style filter that favors clarity over aggressive attenuation.
+                    </p>
+                    <ul>
+                        <li>
+                            <span class="highlight">Noise Reduction</span> is the primary slider—push it right to tighten the noise gate and bring down steady hum, air, and room noise.
+                        </li>
+                        <li>
+                            <span class="highlight">Static Noise</span> captures the steady room tone: hold <strong>Learn</strong> while the unwanted noise is playing, then release to let the filter lock onto that spectrum. Tap <strong>Clear</strong> to reset the learned profile if the noise changes.
+                        </li>
+                        <li>
+                            The <span class="highlight">Quality</span> meter below the noise controls reports how much noise is currently tracked. Stay around the middle of the meter to keep the noise floor suppressed without breathing artifacts.
+                        </li>
+                        <li>
+                            All of this runs together: Noise Reduction, Static Noise, and the Learn/Clear buttons form the noise removal tool so you can handle both broadband and tonal stationary noise in one workflow.
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Clean &amp; Repair Sliders</h2>
+                <div class="control-group">
+                    <div class="control-name">Rumble</div>
+                    <p>High-pass filtering focused on 20–120 Hz to tame mechanical thumps and stage vibration.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">Hiss</div>
+                    <p>Broadband attenuation above ~8 kHz that keeps air noise from creeping into the upper register.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">Static Noise</div>
+                    <p>Learns a constant hum/tone from the room; use the Learn button to capture noise and Clear to reset.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">Noise Reduction</div>
+                    <p>Adaptive noise floor reduction mixing spectral gating and energy-aware smoothing; dial in the amount of suppression.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">De-Verb</div>
+                    <p>Controls early reflection suppression to pull the source forward inside the mix.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">Breath Control</div>
+                    <p>Attenuates breaths and mouth noise between syllables while preserving the inhale energy.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Shape &amp; Polish Sliders</h2>
+                <div class="control-group">
+                    <div class="control-name">Proximity</div>
+                    <p>Restores low-frequency warmth for close-mic performances and compensates for distance.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">Clarity</div>
+                    <p>Sculpts the upper mids to remove muddiness and enhance articulation.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">De-Ess</div>
+                    <p>Limits harsh sibilance while retaining intelligible consonants.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">Leveler</div>
+                    <p>Smooths loudness variations with a transparent compressor- style curve.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Final Output</h2>
+                <div class="control-group">
+                    <div class="control-name">Gain</div>
+                    <p>The last slider before the limiter; use it to match your DAW gain structure or to feed delivery presets.</p>
+                </div>
+                <div class="control-group">
+                    <div class="control-name">Final Output Presets</div>
+                    <p>
+                        Select delivery targets that enforce loudness/true peak ceilings: None, Broadcast (-23 LUFS / -1.0 dBTP), YouTube (-14 LUFS / -1.0 dBTP), or Spotify (-14 LUFS / -1.0 dBTP).
+                    </p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Audio Processing Chain</h2>
+                <div class="audio-chain">
+                    <div class="chain-step">
+                        <div class="chain-step-number">1</div>
+                        Input Signal
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">2</div>
+                        Speech High-Pass Filtering
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">3</div>
+                        Hiss / Rumble / Static Noise Cleanup
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">4</div>
+                        Speech Analysis &amp; Envelope Tracking
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">5</div>
+                        Early Reflection Suppression
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">6</div>
+                        Noise Reduction
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">7</div>
+                        Plosive Softening
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">8</div>
+                        Breath Management
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">9</div>
+                        De-Reverb Processing
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">10</div>
+                        Creative Shaping (Proximity / Clarity)
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">11</div>
+                        Dynamics &amp; Guardrails
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">12</div>
+                        Limiter
+                    </div>
+                    <div class="chain-step">
+                        <div class="chain-step-number">13</div>
+                        Output Gain
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Technical Notes</h2>
+                <ul>
+                    <li>All processing runs with deterministic, audio-thread safe DSP.</li>
+                    <li>Parameters are smoothed to prevent artifacts whenever a slider jumps.</li>
+                    <li>Hidden processes (plosive softening, breath management, etc.) always remain conservative to protect intelligibility.</li>
+                    <li>The noise removal tool already combines adaptive spectral gating, quality monitoring, and a learned static profile.</li>
+                </ul>
+            </div>
+
+            <div class="footer">
+                <p>VxCleaner v0.6.0</p>
+                <p>Copyright © Andrzej Marczewski 2026. All rights reserved.</p>
+            </div>
+        </div>
+    </body>
+</html>
