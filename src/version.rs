@@ -81,7 +81,6 @@ pub struct RemoteRelease {
     pub version: Version,
     pub url: String,
     pub tag: String,
-    pub published_at: Option<String>,
 }
 
 /// Events emitted when the version checker has new data.
@@ -152,7 +151,6 @@ fn fetch_latest_release() -> anyhow::Result<RemoteRelease> {
         version: parsed_version,
         url: release.html_url,
         tag: release.tag_name,
-        published_at: release.published_at,
     })
 }
 
@@ -171,5 +169,4 @@ fn normalize_tag(tag: &str) -> anyhow::Result<Version> {
 struct GitHubRelease {
     tag_name: String,
     html_url: String,
-    published_at: Option<String>,
 }

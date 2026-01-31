@@ -1,6 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Parse command line arguments
+VERSION_INCREMENT=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --major)
+      VERSION_INCREMENT="major"
+      shift
+      ;;
+    --minor)
+      VERSION_INCREMENT="minor"
+      shift
+      ;;
+    --patch)
+      VERSION_INCREMENT="patch"
+      shift
+      ;;
+    *)
+      echo "Unknown option: $1"
+      echo "Usage: $0 [--major|--minor|--patch]"
+      exit 1
+      ;;
+  esac
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
@@ -14,10 +38,73 @@ if [[ -n "$(git status -s -- . ':(exclude).tinyMem' ':(exclude)dist')" ]]; then
   echo "ℹ️ Working tree has changes (excluding .tinyMem/dist); they will be included in the release commit."
 fi
 
+# Function to parse version components
+parse_version() {
+  local version="$1"
+  local major=$(echo "$version" | cut -d. -f1)
+  local minor=$(echo "$version" | cut -d. -f2)
+  local patch=$(echo "$version" | cut -d. -f3)
+  echo "$major $minor $patch"
+}
+
+# Function to increment version
+increment_version() {
+  local version="$1"
+  local increment_type="$2"
+  
+  read -r major minor patch <<< $(parse_version "$version")
+  
+  case "$increment_type" in
+    "major")
+      major=$((major + 1))
+      minor=0
+      patch=0
+      ;;
+    "minor")
+      minor=$((minor + 1))
+      patch=0
+      ;;
+    "patch")
+      patch=$((patch + 1))
+      ;;
+  esac
+  
+  echo "${major}.${minor}.${patch}"
+}
+
+# Read current version from Cargo.toml
 VERSION="$(rg -n 'version = "' Cargo.toml | head -1 | sed -E 's/.*version = "([^"]+)".*/\1/')"
 if [[ -z "${VERSION}" ]]; then
   echo "❌ Could not read version from Cargo.toml."
   exit 1
+fi
+
+# If version increment flag is provided, update the version
+if [[ -n "${VERSION_INCREMENT}" ]]; then
+  NEW_VERSION=$(increment_version "$VERSION" "$VERSION_INCREMENT")
+  echo "🔄 Incrementing version from $VERSION to $NEW_VERSION ($VERSION_INCREMENT)"
+  
+  # Update version in Cargo.toml - only update the first occurrence (package version)
+  # Use a more reliable approach: replace only the first occurrence of the version
+  awk -v new_ver="${NEW_VERSION}" '
+    /^version = / && !seen {
+      gsub(/"[^"]*"/, "\"" new_ver "\"");
+      seen = 1;
+    }
+    { print }
+  ' Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
+
+  # Update version in src/lib.rs
+  sed -i.bak -E "s/(VERSION: &'static str = \")[^\"]+(\")/\1${NEW_VERSION}\2/" src/lib.rs
+  rm src/lib.rs.bak
+  
+  # Update version in Cargo.lock if it exists - only for the main package
+  if [[ -f "Cargo.lock" ]]; then
+    sed -i.bak -E "/name = \"vxcleaner\"/,/version = / s/(version = \")[^\"]+(\")/\1${NEW_VERSION}\2/" Cargo.lock
+    rm Cargo.lock.bak
+  fi
+  
+  VERSION="$NEW_VERSION"
 fi
 
 LIB_VERSION="$(rg -n 'const VERSION' src/lib.rs | sed -E 's/.*"([^"]+)".*/\1/' | tr -d '[:space:]')"
@@ -165,7 +252,9 @@ for entry in "${TARGETS[@]}"; do
   done
 done
 
+# Add files to git (including version files if they were updated)
 git add Cargo.toml Cargo.lock src/lib.rs src/version.rs .gitignore tools/release.sh docs/RELEASE_PROCESS.md CLAUDE.md GEMINI.md QWEN.md
+
 git commit -m "${COMMIT_MSG}"
 
 TAG="v${VERSION}"
