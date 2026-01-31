@@ -260,6 +260,9 @@ git commit -m "${COMMIT_MSG}"
 TAG="v${VERSION}"
 git tag -a "${TAG}" -m "${COMMIT_MSG}"
 
+git push origin HEAD
+git push origin --tags
+
 echo "📦 Creating GitHub release ${TAG}..."
 gh release create "${TAG}" \
   --title "vxcleaner ${TAG}" \
