@@ -22,6 +22,7 @@ Factory presets provide starting points for common voice restoration scenarios. 
 | **Manual** | No preset applied | Custom settings |
 | **Podcast (Noisy Room)** | Balanced cleanup for home studios | Noisy environment podcasting |
 | **Voiceover (Studio)** | Minimal processing for studio work | Professional studio voiceover |
+| **Mud Free** | Reduces low-mid muddiness while preserving body and natural presence | Removing muddiness from vocal recordings |
 | **Interview (Outdoor)** | Aggressive cleanup | Field recordings, outdoor interviews |
 | **Broadcast (Clean)** | Light touch-up | Already-good broadcast audio |
 
@@ -44,6 +45,15 @@ Factory presets provide starting points for common voice restoration scenarios. 
 - De-Esser: 15%
 - Leveler: 60%
 - Breath Control: 25%
+
+#### Mud Free - Reduces low-mid muddiness while preserving body and natural presence
+- Noise Reduction: 10%
+- Reverb Reduction: 20%
+- Proximity: 20%
+- Clarity: 60%
+- De-Esser: 15%
+- Leveler: 55%
+- Breath Control: 20%
 
 #### Interview (Outdoor) - Aggressive cleanup for field recordings
 - Noise Reduction: 55%

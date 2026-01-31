@@ -1,15 +1,17 @@
-# Tasks – Release v0.1.0
+# Tasks – Phase 3 Feature Implementation & Documentation Cleanup
 
-- [x] Prepare release inputs
-  - [x] Confirm commit message
-  - [x] Verify required Rust targets installed
-- [x] Configure cross build toolchains
-  - [x] Install/use cross for Linux
-  - [x] Install/use xwin for Windows
-- [x] Run release script
-  - [x] Build macOS bundles
-  - [x] Build Windows bundles
-  - [x] Build Linux bundles (deferred for this beta)
-  - [x] Create zips with help.html at root
-  - [x] Create commit + tag v0.1.0
-  - [x] Create gh release and upload assets
+- [ ] Clean up and sync documentation files
+  - [ ] Update `CLAUDE.md` (remove protocol duplicates, update version/architecture)
+  - [ ] Sync `GEMINI.md` with `CLAUDE.md`
+  - [ ] Sync `QWEN.md` with `CLAUDE.md`
+- [ ] Implement Double-Click Reset for UI controls
+  - [ ] Implement for sliders in `src/ui/components.rs`
+  - [ ] Implement for macro dials in `src/ui/components.rs`
+- [ ] Implement Hover Tooltips (Comprehensive)
+  - [ ] Verify existing tooltips
+  - [ ] Add missing tooltips to all advanced controls
+- [ ] Implement Cursor Changes on hover
+  - [ ] Update `src/ui.css` with cursor properties for interactive elements
+- [ ] Final Verification
+  - [ ] cargo build --release
+  - [ ] verify all documentation is consistent

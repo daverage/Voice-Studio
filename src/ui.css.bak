@@ -10,6 +10,8 @@ ROOT / GLOBAL LAYOUT
 .app-root {
     background-color: #0f172a;
     color: #e2e8f0;
+    min-width: 100%;
+    min-height: 100%;
 }
 
 .fill-width {
@@ -173,6 +175,7 @@ SIMPLE MODE
     font-size: 18;
     font-weight: bold;
     color: #94a3b8;
+    text-align: center;
 }
 
 .dial-visual {
@@ -187,6 +190,7 @@ SIMPLE MODE
     font-size: 16;
     font-weight: bold;
     color: #ffffff;
+    text-align: center;
     width: 1s;
     height: 1s;
     child-left: 1s;
@@ -220,6 +224,7 @@ LEVEL METERS (SHARED)
 .meter-label {
     font-size: 14;
     color: #64748b;
+    text-align: center;
 }
 
 .noise-floor-row {
@@ -249,6 +254,7 @@ SLIDERS (SHARED)
 .slider-label {
     font-size: 16;
     color: #94a3b8;
+    text-align: right;
     child-left: 1s;
 }
 
@@ -256,6 +262,7 @@ SLIDERS (SHARED)
     font-size: 14;
     font-weight: bold;
     color: #ffffff;
+    text-align: center;
     width: 1s;
     height: 1s;
     child-left: 1s;
@@ -311,6 +318,7 @@ OUTPUT (SHARED)
     width: 60px;
     font-size: 14;
     color: #ffffff;
+    text-align: right;
 }
 
 /* ============================================================================
@@ -333,6 +341,7 @@ ADVANCED MODE
 .tab-header,
 .tab-header-active {
     height: 32px;
+    min-width: 120px;
     child-left: 16px;
     child-right: 16px;
     border-radius: 4px;
@@ -385,6 +394,7 @@ ADVANCED MODE
     width: 100px;
     font-size: 14;
     color: #94a3b8;
+    text-align: right;
 }
 
 .adv-slider {
@@ -395,6 +405,7 @@ ADVANCED MODE
     font-size: 14;
     font-weight: bold;
     color: #ffffff;
+    text-align: center;
     width: 1s;
     height: 1s;
     child-left: 1s;
@@ -553,7 +564,7 @@ NOISE LEARN / SMALL CONTROLS
     bottom: 3px;
 }
 .quality-meter-container {
-    left: 170px;
+    left: 160px;
     width: 200px;
 }
 

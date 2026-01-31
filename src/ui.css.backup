@@ -10,6 +10,8 @@ ROOT / GLOBAL LAYOUT
 .app-root {
     background-color: #0f172a;
     color: #e2e8f0;
+    min-width: 900px;
+    min-height: 550px;
 }
 
 .fill-width {
@@ -151,14 +153,17 @@ SIMPLE MODE
     width: 1s;
     row-between: 24px;
     top: -21px;
-    height: 100px;
+
+    height: auto;
+    bottom: -250px;
 }
 
 /* --- Dials --- */
 
 .dials-container {
-    width: 1s;
-
+    width: 100%;
+    left: 58.3%;
+    transform: translateX(-50%);
     height: auto;
 }
 
@@ -173,6 +178,7 @@ SIMPLE MODE
     font-size: 18;
     font-weight: bold;
     color: #94a3b8;
+    text-align: center;
 }
 
 .dial-visual {
@@ -187,6 +193,7 @@ SIMPLE MODE
     font-size: 16;
     font-weight: bold;
     color: #ffffff;
+    text-align: center;
     width: 1s;
     height: 1s;
     child-left: 1s;
@@ -220,6 +227,7 @@ LEVEL METERS (SHARED)
 .meter-label {
     font-size: 14;
     color: #64748b;
+    text-align: center;
 }
 
 .noise-floor-row {
@@ -249,6 +257,7 @@ SLIDERS (SHARED)
 .slider-label {
     font-size: 16;
     color: #94a3b8;
+    text-align: right;
     child-left: 1s;
 }
 
@@ -256,6 +265,7 @@ SLIDERS (SHARED)
     font-size: 14;
     font-weight: bold;
     color: #ffffff;
+    text-align: center;
     width: 1s;
     height: 1s;
     child-left: 1s;
@@ -311,6 +321,7 @@ OUTPUT (SHARED)
     width: 60px;
     font-size: 14;
     color: #ffffff;
+    text-align: right;
 }
 
 /* ============================================================================
@@ -333,6 +344,7 @@ ADVANCED MODE
 .tab-header,
 .tab-header-active {
     height: 32px;
+    min-width: 120px;
     child-left: 16px;
     child-right: 16px;
     border-radius: 4px;
@@ -385,6 +397,7 @@ ADVANCED MODE
     width: 100px;
     font-size: 14;
     color: #94a3b8;
+    text-align: right;
 }
 
 .adv-slider {
@@ -395,6 +408,7 @@ ADVANCED MODE
     font-size: 14;
     font-weight: bold;
     color: #ffffff;
+    text-align: center;
     width: 1s;
     height: 1s;
     child-left: 1s;
@@ -408,7 +422,7 @@ DROPDOWNS (SHARED)
 ============================================================================ */
 
 .dropdown-row {
-    height: 34px;
+    height: 32px;
     child-space: 1s;
 }
 
@@ -451,9 +465,7 @@ dropdown popup {
     background-color: #1e293b;
     color: #ffffff;
 }
-.output-preset-dropdown popup {
-    top: -110px;
-}
+
 /* ============================================================================
 FOOTER
 ============================================================================ */
@@ -464,7 +476,7 @@ FOOTER
     child-left: 24px;
     child-right: 24px;
     child-space: 1s;
-    right: 0px;
+    right: 54px;
     bottom: 14px;
 }
 
@@ -487,49 +499,15 @@ FOOTER
     background-color: #334155;
 }
 
-.version-stack {
-    row-between: 4px;
-}
-
-.version-text {
-    font-size: 13;
-    font-weight: bold;
-}
-
-.version-normal {
-    color: #64748b;
-}
-
-.version-update {
-    color: #f97316;
-}
-
-.version-detail {
-    font-size: 11;
-    color: #475569;
-}
-
-.version-link {
-    font-size: 12;
-    color: #3b82f6;
-    cursor: pointer;
-}
-
-.version-link:hover {
-    color: #60a5fa;
-}
-
 /* ============================================================================
 NOISE LEARN / SMALL CONTROLS
 ============================================================================ */
 
 .small-button {
     height: 30px;
-    width: 70px;
-    child-left: 1s;
-    child-right: 1s;
-    child-top: 1s;
-    child-bottom: 1s;
+    width: 50px;
+    child-left: 8px;
+    child-right: 8px;
     border-radius: 4px;
     font-size: 13;
     background-color: #1e293b;
@@ -544,20 +522,11 @@ NOISE LEARN / SMALL CONTROLS
 
 .small-button:active {
     background-color: #1d4ed8;
-    border-color: #3b82f6;
+    border-color: #3b82f6tinymem;
 }
 
 .mini-label {
-    font-size: 14;
+    font-size: 12;
     color: #64748b;
-    bottom: 3px;
-}
-.quality-meter-container {
-    left: 170px;
-    width: 200px;
-}
-
-.dsp-preset-dropdown {
-    top: -22px;
-    height: auto;
+    text-align: center;
 }

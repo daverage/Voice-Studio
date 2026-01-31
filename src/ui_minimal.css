@@ -1,0 +1,36 @@
+/* MINIMAL VIZIA-COMPATIBLE CSS TEST */
+/* This uses ONLY properties known to work in Vizia/Morphorm */
+
+* {
+    font-family: "Inter", sans-serif;
+    color: #e0e0e0;
+    background-color: transparent;
+}
+
+.app-root {
+    background-color: #FF0000; /* BRIGHT RED to verify CSS is loaded */
+    width: 1s;
+    height: 1s;
+}
+
+.header {
+    background-color: #00FF00; /* BRIGHT GREEN */
+    height: 68px;
+}
+
+.body {
+    background-color: #0000FF; /* BRIGHT BLUE */
+    width: 1s;
+    height: 1s;
+}
+
+.footer {
+    background-color: #FFFF00; /* BRIGHT YELLOW */
+    height: 40px;
+}
+
+button {
+    background-color: #FF00FF; /* BRIGHT MAGENTA */
+    color: #FFFFFF;
+    height: 28px;
+}

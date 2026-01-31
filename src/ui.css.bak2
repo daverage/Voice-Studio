@@ -1,0 +1,695 @@
+/* ============================================================================
+   Voice Studio UI Stylesheet
+   Professional vocal restoration VST plugin interface
+   Following UI_DESIGN.md specification with Vizia/Morphorm layout
+   ============================================================================ */
+
+/* ============================================================================
+   1. GLOBAL DEFAULTS
+   ============================================================================ */
+
+* {
+    font-family: "Inter", "Roboto", -apple-system, system-ui, sans-serif;
+    color: #e0e0e0; /* Light gray text - primary foreground */
+    background-color: transparent;
+}
+
+/* ============================================================================
+   2. ROOT CONTAINER & MAIN VIEW
+   ============================================================================ */
+
+.app-root {
+    background-color: #202020; /* Dark gray - main background */
+    min-width: 640px;
+    min-height: 360px;
+    width: 1s;
+    height: 1s;
+}
+
+.main-view {
+    background-color: #202020; /* Matches app-root */
+    child-left: 24px;
+    child-right: 24px;
+    child-top: 24px;
+    child-bottom: 24px;
+}
+
+/* ============================================================================
+   3. UTILITY CLASSES & SPACERS
+   ============================================================================ */
+
+/* Flexible stretch spacers for responsive layout */
+.fill-width {
+    width: 1s; /* Stretches to fill available horizontal space */
+}
+
+.fill-height {
+    height: 1s; /* Stretches to fill available vertical space */
+}
+
+.fill-both {
+    width: 1s;
+    height: 1s; /* Fills both dimensions */
+}
+
+/* Fixed-size vertical spacer for consistent gaps */
+.spacer {
+    height: 18px; /* Standard 18px vertical gap */
+}
+
+/* Divider elements to simulate unsupported border properties */
+.divider-horizontal {
+    height: 1px;
+    background-color: #3a3a3a;
+    width: 1s; /* Stretch horizontally */
+}
+
+.divider-vertical {
+    width: 1px;
+    background-color: #3a3a3a;
+    height: 1s; /* Stretch vertically */
+}
+
+/* ============================================================================
+   4. HEADER BAR
+   ============================================================================ */
+
+.header {
+    background-color: #2a2a2a; /* Slightly lighter than main bg */
+    height: 68px;
+    child-left: 24px;
+    child-right: 24px;
+    child-space: 1s;
+}
+
+.header-title-stack {
+    width: 1s;
+    row-between: 2px;
+    left: 24px;
+    top: 10px;
+}
+
+.header-title {
+    font-size: 22;
+    font-weight: bold;
+    color: #ffffff; /* Pure white for emphasis */
+}
+
+.header-sub {
+    font-size: 14;
+    color: #94a3b8; /* Muted blue-gray for subtitle */
+}
+
+/* ============================================================================
+   5. MODE TOGGLE (Simple / Advanced)
+   ============================================================================ */
+
+.mode-group {
+    col-between: 6px; /* Horizontal spacing between toggle buttons */
+}
+
+/* Inactive mode button */
+.mode-button {
+    height: 28px;
+    child-left: 14px;
+    child-right: 14px;
+    border-radius: 4px;
+    font-size: 13;
+    background-color: #334155;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+    child-space: 1s;
+}
+
+.mode-button:hover {
+    background-color: #475569;
+    color: #ffffff;
+}
+
+/* Active mode button */
+.mode-button-active {
+    height: 28px;
+    child-left: 14px;
+    child-right: 14px;
+    border-radius: 4px;
+    font-size: 13;
+    background-color: #3fa7ff; /* Cyan accent - active state */
+    border: 1px solid #3fa7ff;
+    color: #ffffff;
+    child-space: 1s;
+}
+
+.mode-button-active:hover {
+    background-color: #60b7ff; /* Lighter cyan on hover */
+}
+
+/* ============================================================================
+   6. GLOBAL BUTTON STYLES (Base for all buttons)
+   ============================================================================ */
+
+button {
+    background-color: #334155;
+    color: #cbd5e1;
+    border-radius: 4px;
+    font-size: 13;
+    height: 28px;
+    child-top: 8px;
+    child-bottom: 8px;
+    child-left: 12px;
+    child-right: 12px;
+    border: 1px solid #334155;
+    child-space: 1s;
+}
+
+button:hover {
+    background-color: #475569;
+    color: #ffffff;
+}
+
+button:active {
+    background-color: #3fa7ff; /* Cyan accent on click */
+    color: #ffffff;
+}
+
+/* ============================================================================
+   7. BODY LAYOUT CONTAINERS
+   ============================================================================ */
+
+.body {
+    width: 1s;
+    height: 1s;
+    row-between: 12px;
+}
+
+.columns-container {
+    width: 1s;
+    col-between: 40px; /* Horizontal spacing between left meter panel and main content */
+}
+
+/* ============================================================================
+   8. LEFT PANEL - LEVEL METERS
+   ============================================================================ */
+
+.levels-column {
+    width: 180px; /* Fixed width for meter panel */
+    child-right: 20px;
+}
+
+/* Column headers (LEVELS, EASY CONTROLS, OUTPUT, etc.) */
+.column-header {
+    font-size: 14;
+    color: #9ca3af;
+    font-weight: 600;
+}
+
+.col-levels {
+    font-size: 14;
+    color: #9ca3af;
+    font-weight: 600;
+}
+
+.col-clean {
+    row-between: 12px; /* Vertical spacing for Simple mode column */
+}
+
+/* Meter grid layout */
+.meter-grid {
+    height: 260px;
+    col-between: 6px; /* Horizontal spacing between meter columns */
+}
+
+.meter-col {
+    width: 44px; /* Fixed width for each meter column (IN, GR, OUT) */
+}
+
+.meter-pair {
+    col-between: 2px; /* Tight spacing between L/R stereo meters */
+}
+
+.meter-track {
+    width: 12px;
+    background-color: #2a2a2a;
+    border-radius: 2px;
+}
+
+.meter-label {
+    font-size: 14;
+    color: #9ca3af;
+}
+
+/* Noise floor / activity indicator row */
+.noise-floor-row {
+    height: 20px;
+    top: 18px;
+}
+
+.noise-floor-leds {
+    width: 1s;
+    height: 14px;
+}
+
+/* Quality meter for noise learning */
+.quality-meter-container {
+    row-between: 8px;
+}
+
+/* ============================================================================
+   9. CUSTOM VIEW ELEMENTS (Rendered via draw() method, not CSS-styled)
+   ============================================================================
+   These elements are custom Vizia views with their own rendering logic.
+   They don't use CSS for visual styling, but are documented here for reference.
+
+   - level-meter: LevelMeter custom view (input/output/GR meters)
+   - noise-learn-meter: NoiseLearnQualityMeter custom view
+   - nf-leds: NoiseFloorLeds custom view (3-LED activity indicator)
+   - slider-visuals: SliderVisuals custom view (draws slider fill bars)
+   - dial-visuals: DialVisuals custom view (draws circular macro dials)
+   ============================================================================ */
+
+/* ============================================================================
+   10. SIMPLE MODE - MACRO DIALS (CLEAN, ENHANCE, CONTROL)
+   ============================================================================ */
+
+.simple-container {
+    width: 1s;
+    row-between: 24px;
+    top: -21px; /* Slight negative offset for visual alignment */
+    height: auto;
+    bottom: -250px;
+}
+
+.macro-column {
+    col-between: 32px; /* Horizontal spacing in Simple mode column */
+}
+
+.dials-container {
+    width: 1s; /* Use stretch unit to fill available width */
+    child-space: 1s; /* Center children horizontally */
+    height: auto;
+}
+
+.dial-container {
+    width: 200px;
+    height: 200px;
+    row-between: 12px; /* Spacing between label and dial */
+    top: -0px;
+}
+
+.dial-label {
+    font-size: 18;
+    font-weight: bold;
+    color: #cbd5e1;
+}
+
+.dial-visual {
+    width: 160px;
+    height: 160px;
+    background-color: #1a1a1a; /* Dark background for dial area */
+    border: 2px solid #3fa7ff; /* Cyan accent border */
+    border-radius: 12px;
+}
+
+.dial-value {
+    font-size: 16;
+    font-weight: bold;
+    color: #ffffff;
+    width: 1s;
+    height: 1s;
+    child-left: 1s;
+    child-right: 1s;
+    child-top: 1s;
+    child-bottom: 1s;
+}
+
+/* ============================================================================
+   11. ADVANCED MODE - TABS
+   ============================================================================ */
+
+.tabs-container {
+    height: 40px;
+    col-between: 8px; /* Horizontal spacing between tab headers */
+    bottom: 10px;
+}
+
+/* Inactive tab header */
+.tab-header {
+    height: 32px;
+    min-width: 120px;
+    child-left: 16px;
+    child-right: 16px;
+    border-radius: 4px 4px 0 0; /* Rounded top corners only */
+    border: 1px solid #334155;
+    font-size: 14;
+    child-space: 1s;
+    background-color: #2a2a2a;
+    color: #94a3b8;
+}
+
+.tab-header:hover {
+    background-color: #334155;
+    color: #ffffff;
+}
+
+/* Active tab header */
+.tab-header-active {
+    height: 32px;
+    min-width: 120px;
+    child-left: 16px;
+    child-right: 16px;
+    border-radius: 4px 4px 0 0;
+    border: 1px solid #3fa7ff; /* Cyan border for active tab */
+    font-size: 14;
+    child-space: 1s;
+    background-color: #1a1a1a; /* Matches tab content background */
+    color: #ffffff;
+}
+
+.tab-header-active:hover {
+    background-color: #1a1a1a; /* No change on hover for active tab */
+}
+
+/* Tab content area */
+.tab-content {
+    width: 1s;
+    height: 1s;
+    background-color: #1a1a1a;
+    border-radius: 0 4px 4px 4px; /* Rounded except top-left */
+    child-left: 16px;
+    child-right: 16px;
+    child-top: 16px;
+    child-bottom: 16px;
+}
+
+/* Specific tab content classes (for additional styling if needed) */
+.tab-clean-repair {
+    /* Clean & Repair tab content */
+}
+
+.tab-shape-polish {
+    /* Shape & Polish tab content */
+}
+
+/* Advanced mode column layouts */
+.adv-columns {
+    width: 1s;
+    col-between: 24px; /* Horizontal spacing between columns in advanced tabs */
+}
+
+.adv-column,
+.tab-column {
+    width: 1s;
+    row-between: 12px; /* Vertical spacing between sliders in a column */
+}
+
+/* ============================================================================
+   12. SLIDER CONTROLS (Advanced Mode)
+   ============================================================================ */
+
+.slider-container {
+    height: 56px;
+    bottom: 6px;
+    top: 10px;
+}
+
+.adv-row {
+    width: 1s;
+    height: 36px;
+    col-between: 12px; /* Spacing between label and slider */
+}
+
+.slider-label,
+.adv-label {
+    width: 120px; /* Fixed label width for alignment */
+    font-size: 14;
+    color: #cbd5e1;
+    child-left: 1s;
+}
+
+.slider-visual,
+.adv-slider {
+    height: 30px;
+    width: 1s;
+    background-color: #1a1a1a;
+    border-radius: 6px;
+    border: 1px solid #3fa7ff; /* Cyan accent border */
+}
+
+.slider-value,
+.adv-value {
+    font-size: 14;
+    font-weight: bold;
+    color: #ffffff;
+    width: 1s;
+    height: 1s;
+    child-left: 1s;
+    child-right: 1s;
+    child-top: 1s;
+    child-bottom: 1s;
+}
+
+/* ============================================================================
+   13. HIDDEN INPUTS (For custom visual overlays)
+   ============================================================================
+   Used to hide the default ParamSlider visuals when we draw custom ones
+   ============================================================================ */
+
+.input-hidden {
+    background-color: transparent;
+    border-color: transparent;
+    color: transparent;
+    opacity: 0;
+}
+
+.input-hidden .fill,
+.input-hidden .value {
+    background-color: transparent;
+    color: transparent;
+}
+
+.slider-visual {
+    background-color: transparent;
+    width: 1s;
+    height: 1s;
+}
+
+.slider-visual .fill {
+    background-color: transparent;
+}
+
+/* ============================================================================
+   14. DROPDOWN MENUS
+   ============================================================================ */
+
+.dropdown-row {
+    height: 32px;
+    child-space: 1s;
+    col-between: 8px;
+}
+
+.dropdown-label {
+    width: 120px; /* Matches slider label width for alignment */
+    font-size: 14;
+    color: #cbd5e1;
+}
+
+.dropdown-box {
+    width: 180px;
+    height: 28px;
+    background-color: #1a1a1a;
+    border: 1px solid #3fa7ff; /* Cyan accent border */
+    border-radius: 4px;
+}
+
+.dropdown-selected {
+    font-size: 14;
+    color: #ffffff;
+}
+
+.dropdown-popup {
+    background-color: #1a1a1a;
+    border: 1px solid #3fa7ff;
+    border-radius: 4px;
+}
+
+.dropdown-options {
+    background-color: #1a1a1a;
+}
+
+.dropdown-option {
+    height: 26px;
+    width: 100%;
+    child-left: 8px;
+    child-right: 8px;
+    font-size: 14;
+    color: #cbd5e1;
+    background-color: #1a1a1a;
+}
+
+.dropdown-option:hover {
+    background-color: #3fa7ff; /* Cyan highlight on hover */
+    color: #ffffff;
+}
+
+/* DSP preset dropdown (additional class for specific targeting if needed) */
+.dsp-preset-dropdown {
+    /* Inherits dropdown-row styles */
+}
+
+/* ============================================================================
+   15. OUTPUT SECTION
+   ============================================================================ */
+
+.output-section {
+    width: 1s;
+    row-between: 10px;
+    top: 150px; /* Positioned below main content */
+}
+
+.output-accent {
+    font-size: 14;
+    font-weight: bold;
+    color: #3fa7ff; /* Cyan accent for OUTPUT label */
+}
+
+.output-row {
+    width: 1s;
+    height: 32px;
+    child-space: 1s;
+}
+
+.output-actions {
+    col-between: 8px; /* Spacing between action buttons (Learn, Clear) */
+}
+
+/* ============================================================================
+   16. SMALL BUTTONS & CONTROLS (Learn, Clear buttons)
+   ============================================================================ */
+
+.small-button {
+    height: 30px;
+    width: 50px;
+    child-left: 8px;
+    child-right: 8px;
+    border-radius: 4px;
+    font-size: 13;
+    background-color: #334155;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+}
+
+.small-button:hover {
+    background-color: #475569;
+    color: #ffffff;
+}
+
+.small-button:active {
+    background-color: #3fa7ff; /* Cyan accent when pressed */
+    border-color: #3fa7ff;
+}
+
+.mini-label {
+    font-size: 12;
+    color: #9ca3af;
+}
+
+/* Container for grouped controls */
+.group-container {
+    row-between: 8px;
+}
+
+/* ============================================================================
+   17. FOOTER BAR
+   ============================================================================ */
+
+.footer {
+    height: 40px;
+    background-color: #2a2a2a; /* Matches header */
+    child-left: 24px;
+    child-right: 24px;
+    child-space: 1s;
+}
+
+.footer-buttons {
+    col-between: 10px; /* Horizontal spacing between footer buttons */
+}
+
+.footer-button {
+    height: 28px;
+    child-left: 12px;
+    child-right: 12px;
+    border-radius: 4px;
+    font-size: 14;
+    background-color: #334155;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+}
+
+.footer-button:hover {
+    background-color: #475569;
+}
+
+.footer-button:active {
+    background-color: #3fa7ff; /* Cyan accent on click */
+    color: #ffffff;
+}
+
+/* ============================================================================
+   18. VERSION INFO (Footer left side)
+   ============================================================================ */
+
+.version-stack {
+    row-between: 4px;
+}
+
+.version-text {
+    font-size: 11;
+    color: #94a3b8;
+}
+
+.version-detail {
+    font-size: 10;
+    color: #64748b;
+}
+
+/* Update available styling (applied dynamically) */
+.version-update {
+    font-size: 11;
+    color: #fbbf24; /* Amber for update notification */
+}
+
+.version-normal {
+    font-size: 11;
+    color: #94a3b8; /* Normal gray-blue */
+}
+
+/* View Release button (shown when update available) */
+.version-release-button {
+    font-size: 11;
+    background-color: #3fa7ff; /* Cyan accent */
+    color: #ffffff;
+    child-top: 4px;
+    child-bottom: 4px;
+    child-left: 8px;
+    child-right: 8px;
+    border-radius: 3px;
+}
+
+.version-release-button:hover {
+    background-color: #60b7ff; /* Lighter cyan on hover */
+}
+
+/* ============================================================================
+   19. METER LABELS (Additional styling for meter column headers)
+   ============================================================================ */
+
+.meter-label-in,
+.meter-label-out,
+.meter-label-gr {
+    font-size: 11;
+    color: #9ca3af;
+    height: auto;
+}
+
+/* ============================================================================
+   END OF STYLESHEET
+   ============================================================================ */

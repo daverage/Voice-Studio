@@ -30,6 +30,7 @@ Voice Studio is built around a tightly integrated DSP restoration pipeline that 
 
 - **Simple Mode**: Intent-based macro controls (Distance, Clarity, Consistency) for rapid results.
 - **Advanced Mode**: Granular access to every stage of the restoration and dynamics chain.
+- **Factory Presets**: Multiple starting points for common scenarios including Podcast, Voiceover, Mud Free, and Broadcast presets.
 - **Global Reset**: Instantly clear all DSP state and return to defaults.
 - **Delivery Presets**: Built-in loudness targeting for YouTube, Spotify, and Broadcast standards.
 
