@@ -9,7 +9,7 @@ mod version;
 use crate::dsp::{
     Biquad, BreathReducer, ChannelProcessor, ClarityDetector, DeEsserDetector, DenoiseConfig,
     EarlyReflectionSuppressor, HissRumble, LinkedCompressor, LinkedLimiter, NoiseLearnRemove,
-    NoiseLearnRemoveConfig, PinkRefBias, PlosiveSoftener, ProfileAnalyzer, SpectralGuardrails,
+    NoiseLearnRemoveConfig, PinkRefBias, PlosiveSoftener, ProfileAnalyzer, RecoveryStage, SpectralGuardrails,
     SpeechConfidenceEstimator, SpeechExpander, SpeechHpf, StereoStreamingDenoiser,
 };
 use crate::macro_controller::{compute_simple_macro_targets, SimpleMacroTargets};
@@ -332,6 +332,7 @@ struct VoiceStudioPlugin {
     spectral_guardrails: SpectralGuardrails,
     hiss_rumble: HissRumble,
     noise_learn_remove: NoiseLearnRemove,
+    recovery_stage: RecoveryStage,
 
     // Hidden hygiene and automatic protection
     speech_hpf: SpeechHpf,
@@ -544,6 +545,7 @@ impl Default for VoiceStudioPlugin {
             spectral_guardrails: SpectralGuardrails::new(DEFAULT_SAMPLE_RATE),
             hiss_rumble: HissRumble::new(DEFAULT_SAMPLE_RATE),
             noise_learn_remove: NoiseLearnRemove::new(2048, 512, DEFAULT_SAMPLE_RATE),
+            recovery_stage: RecoveryStage::new(DEFAULT_SAMPLE_RATE),
 
             speech_hpf: SpeechHpf::new(DEFAULT_SAMPLE_RATE),
             plosive_softener_l: PlosiveSoftener::new(DEFAULT_SAMPLE_RATE),
@@ -660,6 +662,7 @@ impl Plugin for VoiceStudioPlugin {
             self.spectral_guardrails = SpectralGuardrails::new(self.sample_rate);
             self.hiss_rumble = HissRumble::new(self.sample_rate);
             self.noise_learn_remove = NoiseLearnRemove::new(2048, 512, self.sample_rate);
+            self.recovery_stage = RecoveryStage::new(self.sample_rate);
 
             self.speech_hpf = SpeechHpf::new(self.sample_rate);
             self.plosive_softener_l = PlosiveSoftener::new(self.sample_rate);
@@ -776,6 +779,7 @@ impl Plugin for VoiceStudioPlugin {
             self.spectral_guardrails.reset();
             self.hiss_rumble.reset();
             self.noise_learn_remove.reset();
+            self.recovery_stage.reset();
             self.speech_hpf.reset();
             self.plosive_softener_l.reset();
             self.plosive_softener_r.reset();
@@ -1341,12 +1345,16 @@ impl VoiceStudioPlugin {
                 (s6_l * leveler_gain, s6_r * leveler_gain)
             };
 
-            // D. SPECTRAL GUARDRAILS (safety layer before limiter)
+            // D. RECOVERY STAGE (speech-gated EQ after all subtractive processing)
+            // Applies presence and air shelving during speech to compensate for losses
+            let (rec_l, rec_r) = self.recovery_stage.process(s7_l, s7_r, sidechain.speech_conf);
+
+            // E. SPECTRAL GUARDRAILS (safety layer before limiter)
             // Prevents extreme settings from breaking sound
             // Note: Applied after leveler to ensure gain reduction doesn't exceed limiter threshold
             let (s7g_l, s7g_r) =
                 self.spectral_guardrails
-                    .process(s7_l, s7_r, true, sidechain.speech_conf);
+                    .process(rec_l, rec_r, true, sidechain.speech_conf);
 
             let (s8_l, s8_r) = if bypass_dynamics {
                 (s7g_l, s7g_r)
@@ -1355,7 +1363,7 @@ impl VoiceStudioPlugin {
                 (s7g_l * limiter_gain, s7g_r * limiter_gain)
             };
 
-            // E. OUTPUT GAIN
+            // F. OUTPUT GAIN
             let s9_l = s8_l * output_gain_lin;
             let s9_r = s8_r * output_gain_lin;
 
