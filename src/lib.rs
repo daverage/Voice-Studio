@@ -1393,24 +1393,23 @@ impl VoiceStudioPlugin {
                 (s6_l * leveler_gain, s6_r * leveler_gain)
             };
 
-            // D. RECOVERY STAGE (speech-gated EQ after all subtractive processing)
-            // Applies presence and air shelving during speech to compensate for losses
-            let (rec_l, rec_r) = self.recovery_stage.process(s7_l, s7_r, sidechain.speech_conf, sidechain.integrity_score);
-
-            // E. SPECTRAL GUARDRAILS (safety layer before limiter)
+            // D. SPECTRAL GUARDRAILS (safety layer, runs before recovery)
             // Prevents extreme settings from breaking sound
-            // Note: Applied after leveler to ensure gain reduction doesn't exceed limiter threshold
             let (s7g_l, s7g_r) =
                 self.spectral_guardrails
-                    .process(rec_l, rec_r, true, sidechain.speech_conf, sidechain.integrity_score);
+                    .process(s7_l, s7_r, true, sidechain.speech_conf, sidechain.integrity_score);
+
+            // E. RECOVERY STAGE (speech-gated EQ, after guardrails so it cannot be undone)
+            // Restores presence and air lost to earlier subtractive stages
+            let (rec_l, rec_r) = self.recovery_stage.process(s7g_l, s7g_r, sidechain.speech_conf, sidechain.integrity_score);
 
             let (s8_l, s8_r) = if bypass_dynamics {
-                (s7g_l, s7g_r)
+                (rec_l, rec_r)
             } else {
                 let last_sidechain = self.speech_confidence.get_output();
                 let denoiser_reduction = self.denoiser.get_current_reduction();
-                let limiter_gain = self.linked_limiter.compute_gain(s7g_l, s7g_r, last_sidechain.speech_conf, denoiser_reduction);
-                (s7g_l * limiter_gain, s7g_r * limiter_gain)
+                let limiter_gain = self.linked_limiter.compute_gain(rec_l, rec_r, last_sidechain.speech_conf, denoiser_reduction);
+                (rec_l * limiter_gain, rec_r * limiter_gain)
             };
 
             // F. OUTPUT GAIN
@@ -1579,21 +1578,22 @@ impl VoiceStudioPlugin {
             .total_gain_reduction_db
             .store(total_gr_db, Ordering::Relaxed);
 
-        // Update loudness compensation gain based on RMS envelopes (Always on)
-        // Use more conservative approach to prevent pumping
-        if self.post_rms_env > 1e-8 && self.pre_rms_env > 1e-8 {
+        // Update loudness compensation gain based on RMS envelopes
+        // Confidence-gated: releases toward unity during silence to prevent noise-floor lift
+        let comp_conf = self.speech_confidence.get_output().speech_conf;
+        let slow_rms_alpha = 1.0 - (-1.0 / (10.0 * self.sample_rate)).exp(); // 10 second time constant
+
+        if comp_conf < 0.25 {
+            // Silence: release toward unity only, never track
+            self.loudness_comp_gain += (1.0 - self.loudness_comp_gain) * slow_rms_alpha;
+        } else if self.post_rms_env > 1e-8 && self.pre_rms_env > 1e-8 {
             let current_ratio = (self.pre_rms_env / self.post_rms_env).sqrt();
-
-            // Use a more conservative target gain (±10% instead of ±100%)
             let target_gain = current_ratio.clamp(0.9, 1.1);
-
-            // Use a much slower slew rate for loudness compensation to prevent pumping
-            let slow_rms_alpha = 1.0 - (-1.0 / (10.0 * self.sample_rate)).exp(); // 10 second time constant
-
-            self.loudness_comp_gain += (target_gain - self.loudness_comp_gain) * slow_rms_alpha;
+            // Soft gate: tracking strength ramps 0 → 1 over conf 0.25 → 0.6
+            let conf_scale = ((comp_conf - 0.25) / 0.35).clamp(0.0, 1.0);
+            let gated_target = 1.0 + (target_gain - 1.0) * conf_scale;
+            self.loudness_comp_gain += (gated_target - self.loudness_comp_gain) * slow_rms_alpha;
         } else {
-            // Use a slower rate to return to unity gain
-            let slow_rms_alpha = 1.0 - (-1.0 / (10.0 * self.sample_rate)).exp(); // 10 second time constant
             self.loudness_comp_gain += (1.0 - self.loudness_comp_gain) * slow_rms_alpha;
         }
 
