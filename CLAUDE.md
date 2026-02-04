@@ -26,109 +26,222 @@ This file provides global guidance for any agent working in the Voice Studio (Vx
 - Always sync `CLAUDE.md`, `GEMINI.md`, `QWEN.md`, and `AGENTS.md` whenever the architecture, release flow, or constraints change.
 - Ensure the UI shows the “update available” footer notification when a newer GitHub release exists, as a side effect of the release checker built into the UI footer.
 **Start of tinyMem Protocol**
-# TINYMEM AGENT CONTRACT
 
-## Memory Governance & Task Authority Specification
+# TINYMEM AGENT CONTRACT (Governed — Task-Externalised)
 
-This contract governs **all repository-related behavior** when tinyMem is present.
-
-It is **authoritative**, **mandatory**, and **self-validating**.
-Non-compliance invalidates the response by definition.
+This contract governs all repository-related behavior when tinyMem is present.
+Non-compliance invalidates the response.
 
 ---
 
-## Core Principle
+## 0. Scope
 
-> **Observation is free. Mutation is explicit.**
+A request is **repository-related** if it touches:
 
-Reading, inspecting, recalling, and reasoning require no ceremony.
-Only durable state mutation requires explicit intent and gating.
+* code
+* files
+* documentation
+* configuration
+* architecture
+* tasks
+* planning
+* repository state
 
 ---
 
-## 1. Binding Definitions
+## 1. Core Principle
 
-**Repository-related request**
-Any request that touches code, files, documentation, architecture, configuration, planning, tasks, or repository state.
+Observation is free.
+Sequencing is authority.
+Mutation is explicit.
 
-**Durable mutation**
-Any action that changes repository state or creates durable project state:
-* Writing or modifying files
-* Creating, updating, or completing tasks
-* Promoting claims to facts
-* Writing decision or constraint memories
+---
 
-**Task Authority**
-`tinyTasks.md` in the project root is the **single source of truth** for task state.
+## 2. Tool Definitions (Authoritative)
+
+### Memory Recall
+
+* `memory_query`
+* `memory_recent`
+
+Available in ALL modes (implementing "Observation is free").
+Required before any mutation in GUARDED/STRICT modes.
+
+### Intent Declaration
+
+* `memory_set_mode`
+
+Required before any mutation.
+
+### Memory Write
+
+* `memory_write`
+
+The **only** permitted mechanism for durable memory.
+
+### Task Authority
+
+* `tinyTasks.md` in the project root
+* Optional task-authority helper tool
+
+---
+
+## 3. Definitions
+
+### Observation
+
+Reading, inspecting, analyzing, summarizing, or asking questions.
+
+### Mutation
+
+Any durable state change, including:
+
+* writing or modifying files
+* creating, updating, or completing tasks
+* writing memory
+* promoting a claim to a fact, decision, or constraint
+
+### Task Authority
+
+`tinyTasks.md` is the single source of truth for task state.
 Task state must never be inferred.
 
----
+### Task Identification
 
-## 2. Observation (Always Allowed)
+The moment the agent identifies, implies, or sequences more than one actionable step.
 
-The following require no mode declaration:
-* Query memory (`memory_query`, `memory_recent`)
-* Check task authority (`memory_check_task_authority`)
-* Read health/diagnostics (`memory_health`, `memory_doctor`, `memory_stats`, `memory_run_metadata`)
-* Read files
-* Analyze code
-* Provide guidance
-* Ask questions
+This includes:
 
-Memory recall is **strongly recommended** for all repository-related conversations, and **mandatory** before any durable mutation.
-
-**NOTE:** In GUARDED and STRICT modes, memory recall is **enforced** — `memory_write` will fail if `memory_query` or `memory_recent` was not called first. In PASSIVE mode, violations are logged but not blocked.
+* plans
+* approaches
+* checklists
+* ordered bullets
+* “first / then / next”
+* step-by-step reasoning
 
 ---
 
-## 3. Mutation (Requires Explicit Intent)
+## 4. Modes (Intent)
 
-Before performing any durable mutation, you MUST:
+You operate in exactly one mode:
 
-1. **Query project memory** using `memory_query` or `memory_recent`
-   - Retrieve facts, decisions, constraints, and patterns
-   - Ensure work aligns with project truth
+* **PASSIVE** — observation only
+* **GUARDED** — bounded, reversible mutation
+* **STRICT** — maximum caution, full enforcement
 
-2. **Declare intent** by calling `memory_set_mode`
-   - The system will enforce the appropriate clearance for the requested mutation
-
-3. **Check task authority** by reading `tinyTasks.md` (or confirming it doesn't exist)
-   - **Recommended:** Use `memory_check_task_authority` to get explicit authorization status
-   - Alternative: Read `tinyTasks.md` directly via file system tools
-   - If unchecked tasks exist, resume from the first unchecked subtask
-   - If tasks exist but none are unchecked, refuse execution and request user input
-   - If file doesn't exist, you may create it for multi-step work (or the system may auto-create it)
+Mode MUST be declared via `memory_set_mode` before mutation.
 
 ---
 
-## 4. tinyTasks.md (Task Authority)
+## 5. Rule Set (Stable IDs)
 
-### When Required
-Multi-step work persisting across turns requires task tracking via `tinyTasks.md`.
+### R1 — Recall Before Mutation
 
-### Auto-Creation
-The system may auto-create `tinyTasks.md` when multi-step work is implied.
+Memory recall tools (`memory_query`, `memory_recent`) are available in ALL modes (implementing "Observation is free").
 
-**Critical invariants:**
-* Presence of `tinyTasks.md` is **not** authorization
-* Presence of unchecked, human-authored tasks **is** authorization
+Before any mutation in GUARDED/STRICT modes, you MUST:
 
-If the file exists with no unchecked tasks, refuse execution and request human input.
+* call `memory_query` or `memory_recent`
+* acknowledge the result (even if empty)
 
-### Canonical Inert Template
+---
+
+### R2 — Task Externalisation Is Mandatory
+
+The agent may NOT hold a task list internally.
+
+If **Task Identification** occurs:
+
+1. All steps MUST be externalised into `tinyTasks.md`
+2. No mutation may occur until task authority is resolved
+
+If `tinyTasks.md` does NOT exist:
+
+* Create the inert template
+* Populate it with a proposed task list
+* STOP
+* Request the human to review, edit, reorder, or approve the proposed tasks
+
+Creation or population of `tinyTasks.md` does NOT authorize work.
+
+Planning in the response body is prohibited once this rule triggers.
+
+#### Task Proposal Allowance
+
+The agent MAY populate `tinyTasks.md` with a proposed task list.
+
+Proposed tasks are NOT authorized until a human:
+- confirms them explicitly, or
+- edits or reorders them, or
+- states approval in plain language
+
+The agent MUST stop after proposing tasks and wait for human authorization.
+
+---
+
+### R3 — Tasks Are Authoritative
+
+If `tinyTasks.md` exists:
+
+* Continue the **first unchecked subtask**
+* If no unchecked subtasks exist, STOP and request user input
+
+The agent may NOT:
+
+* skip tasks
+* reorder tasks
+* redefine tasks
+* invent progress
+
+---
+
+### R4 — Mutation Requires Intent
+
+Before any mutation, ALL of the following MUST be true, in order:
+
+1. R1 satisfied (memory recall in GUARDED/STRICT modes)
+2. Intent declared via `memory_set_mode`
+3. R2 satisfied (task externalised if required)
+4. R3 satisfied (task authority confirmed)
+
+---
+
+### R5 — Durable Memory Is Tool-Only
+
+* Use `memory_write` only
+* Facts require evidence
+* Decisions and constraints require rationale
+* Never claim a memory write unless the tool succeeded
+
+---
+
+### R6 — Fail Closed
+
+If recall, intent, task authority, or enforcement is uncertain:
+
+* Continue with observation only, OR
+* STOP and request user input
+
+Never guess. Never proceed optimistically.
+
+---
+
+## 6. tinyTasks.md Templates
+
+### Inert Auto-Creation Template
+
 ```md
-# Tasks — NOT STARTED
+# Tasks — PROPOSED
 >
-> This file was created automatically because a multi-step workflow
-> may be required.
+> These tasks were proposed by the agent.
+> No work is authorised until a human reviews and confirms them.
 >
-> No work is authorised until a human edits this file and defines tasks.
-
 ## Tasks
 <!-- No tasks defined yet -->
 ```
 
-### Required Structure
+### Active Task Structure
+
 ```md
 # Tasks – <Goal>
 
@@ -136,125 +249,49 @@ If the file exists with no unchecked tasks, refuse execution and request human i
   - [ ] Atomic subtask
 ```
 
----
+Rules:
 
-## 5. Durable Memory Writeback (MANDATORY)
-
-### When to Write
-
-**Write memories immediately when:**
-
-1. **User states a preference or decision**
-   - Example: "We prefer React over Vue"
-   - Action: `memory_write` with type `decision`
-
-2. **A constraint is established**
-   - Example: "Never commit secrets to git"
-   - Action: `memory_write` with type `constraint`
-
-3. **You discover a verifiable fact**
-   - Example: "API runs on port 8080"
-   - Action: `memory_write` with type `fact` (include evidence)
-
-4. **Architectural pattern is defined**
-   - Example: "All services use dependency injection"
-   - Action: `memory_write` with type `decision`
-
-5. **User corrects your understanding**
-   - Example: "No, we use PostgreSQL, not MySQL"
-   - Action: `memory_write` with type `fact`
-
-### Evidence Requirements
-
-* **Facts** require evidence: `cmd_exit0::test command`, `file_exists::path`, `grep_hit::pattern::file`
-* **Decisions and constraints** require rationale in `detail` field
-* **Notes and observations** are free-form
-
-### After Writing
-
-Confirm the memory write to the user:
-```
-✅ Stored decision: "Prefer TypeScript for new features"
-```
+* Two levels only
+* Order matters
+* Unchecked == authorized *after human confirmation*
 
 ---
 
-## 6. Error Handling
+## 7. Enforcement Expectations
 
-If a required tool operation fails:
-* Declare the failure
-* Retry up to 2 times
-* Stop and request user intervention
-* Do NOT proceed with irreversible actions
+Expected to be enforceable at the boundary:
 
----
+* block mutation without recall
+* block mutation without intent
+* block mutation when tasks are required but missing
+* block mutation when tasks exist but none are unchecked
+* track violations for audit
 
-## 7. Invalid Actions
-
-The following invalidate the response:
-* No memory recall executed before repository-related work
-* No task-state read when multi-step work is involved (or confirmation of absence)
-* Inferring task or memory state
-* Ignoring unchecked tasks in `tinyTasks.md`
-* Writing speculative memory as durable facts
-* Mutating state without explicit intent declaration
+If enforcement is unavailable, self-enforce and fail closed (R6).
 
 ---
 
-## 8. End-of-Response Checklist (Multi-Step Work)
+## 8. Error Handling
 
-When performing multi-step work, validate:
+If a required tool fails:
 
-* [ ] Memory recall executed (grounded in project truth)
-* [ ] Intent declared via `memory_set_mode`
-* [ ] `tinyTasks.md` read (or confirmed missing)
-* [ ] Tasks updated if applicable
-* [ ] Durable memory written OR explicit declaration of none needed
+1. State the failure
+2. Retry up to 2 times
+3. STOP and request human intervention
 
 ---
 
-## 9. Enforcement & Tracking
+## 9. End-of-Response Checklist (When Mutation Occurs)
 
-### MCP Boundary Enforcement
+Confirm explicitly:
 
-The following contract requirements are **enforced at the MCP boundary** (not just recommended):
+* recall completed in GUARDED/STRICT modes (R1)
+* mode declared (R4)
+* task authority resolved (R2, R3)
+* memory writes completed or not required (R5)
 
-**Recall Before Mutation (GUARDED/STRICT):**
-- `memory_write` will **fail** if `memory_query` or `memory_recent` was not called first
-- Error returned: "Memory recall required: Call memory_query or memory_recent before memory_write"
-- In PASSIVE mode: Logged as violation but not blocked
-
-**Violation Tracking:**
-- All contract violations are tracked in `memory_run_metadata`
-- Fields: `violations_count`, `blocked_actions_count`, `enforcement_events[]`
-- Violations include: recall not performed, unauthorized task execution attempts
-- Use this data to audit agent compliance and identify enforcement gaps
-
-### Helper Tools
-
-**memory_check_task_authority()**
-- Returns task file status: `{exists, unchecked_tasks, authorization, task_count, next_task}`
-- Authorization values:
-  - `"create_allowed"` - file absent, agent may create
-  - `"authorized"` - unchecked tasks present, agent may proceed
-  - `"unauthorized"` - no unchecked tasks, agent must request user input
-- Use this instead of manually parsing `tinyTasks.md` for clearer contract compliance
-
-**memory_run_metadata()**
-- Returns enforcement metadata for the current session
-- Includes: execution mode, enforcement events, violation counts, success counts
-- Use to verify your own contract compliance during execution
+Do not restate this contract.
 
 ---
-
-## 10. Summary
-
-**Simple rules:**
-
-1. **Think freely** — read, query, analyze without restriction
-2. **Declare intent** — call `memory_set_mode` before mutation
-3. **Respect tasks** — never bypass `tinyTasks.md` authority
-4. **Write memories** — capture decisions, constraints, facts as you learn
-5. **Fail closed** — if unsure, ask; if blocked, stop
 
 **End of tinyMem Protocol**

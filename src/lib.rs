@@ -1065,7 +1065,20 @@ impl VoiceStudioPlugin {
 
             // 0d. SPEECH CONFIDENCE (sidechain analysis - no audio modification)
             // Must be computed from HPF, not noise-reduced audio
-            let sidechain = self.speech_confidence.process(hpf_l, hpf_r);
+            let mut sidechain = self.speech_confidence.process(hpf_l, hpf_r);
+
+            // Get expander gain reduction for integrity score calculation
+            let expander_gr_db = self.speech_expander.get_gain_reduction_db();
+
+            // Calculate speech integrity score
+            sidechain.integrity_score = self.calculate_integrity_score(
+                sidechain.speech_conf,
+                sidechain.confidence_slope,
+                self.denoiser.get_current_reduction(), // Denoise reduction
+                self.early_reflection_l.get_suppression().max(self.early_reflection_r.get_suppression()), // Early reflection suppression
+                expander_gr_db,
+            );
+
 
             // 0x. NOISE LEARN REMOVE (Static Noise)
             // Independent of speech, works during silence
@@ -1126,12 +1139,13 @@ impl VoiceStudioPlugin {
             // 2. SPEECH EXPANDER (after early reflection, before denoise)
             // Controls pauses and room swell without hard gating
             let expander_amt = (reverb_amt * 0.6).clamp(0.0, 1.0);
+            let denoiser_reduction = self.denoiser.get_current_reduction(); // Get current denoiser reduction
 
             let (exp_l, exp_r) = if expander_amt < 0.001 {
                 (pre_l, pre_r)
             } else {
                 self.speech_expander
-                    .process(pre_l, pre_r, expander_amt, &sidechain, &env_l, &env_r)
+                    .process(pre_l, pre_r, expander_amt, &sidechain, denoiser_reduction, &env_l, &env_r)
             };
 
             // 3. PINK REFERENCE BIAS (Hidden Spectral Tonal Conditioning)
@@ -1162,8 +1176,8 @@ impl VoiceStudioPlugin {
             };
 
             // 4. PLOSIVE SOFTENER (after denoise, before breath)
-            let s1b_l = self.plosive_softener_l.process(s1_l);
-            let s1b_r = self.plosive_softener_r.process(s1_r);
+            let s1b_l = self.plosive_softener_l.process(s1_l, &sidechain);
+            let s1b_r = self.plosive_softener_r.process(s1_r, &sidechain);
 
             // 5. BREATH REDUCER (after plosive, before deverb)
             let s1c_l = self
@@ -1221,12 +1235,14 @@ impl VoiceStudioPlugin {
                         prox_amt,
                         sidechain.speech_conf,
                         clarity_amt,
+                        sidechain.integrity_score,
                     ),
                     self.process_r.shaping_chain.proximity.process(
                         s3_r,
                         prox_amt,
                         sidechain.speech_conf,
                         clarity_amt,
+                        sidechain.integrity_score,
                     ),
                 )
             };
@@ -1236,6 +1252,8 @@ impl VoiceStudioPlugin {
             } else {
                 self.clarity_detector.analyze(s4_l, s4_r)
             };
+            let denoiser_reduction = self.denoiser.get_current_reduction();
+            let early_reflection_avg_suppression = 0.5 * (self.early_reflection_l.get_suppression() + self.early_reflection_r.get_suppression());
             let (s5_l, s5_r) = if bypass_shaping {
                 (s4_l, s4_r)
             } else {
@@ -1245,12 +1263,18 @@ impl VoiceStudioPlugin {
                         clarity_amt,
                         sidechain.speech_conf,
                         clarity_drive,
+                        denoiser_reduction,
+                        early_reflection_avg_suppression,
+                        sidechain.integrity_score,
                     ),
                     self.process_r.shaping_chain.clarity.process(
                         s4_r,
                         clarity_amt,
                         sidechain.speech_conf,
                         clarity_drive,
+                        denoiser_reduction,
+                        early_reflection_avg_suppression,
+                        sidechain.integrity_score,
                     ),
                 )
             };
@@ -1264,17 +1288,17 @@ impl VoiceStudioPlugin {
             } else {
                 let de_ess_gain = self
                     .linked_de_esser
-                    .compute_gain(s5_l, s5_r, de_ess_amt, &env_l, &env_r);
+                    .compute_gain(s5_l, s5_r, de_ess_amt, sidechain.confidence_slope, denoiser_reduction, &env_l, &env_r, sidechain.integrity_score);
                 let out_l = self
                     .process_l
                     .dynamics_chain
                     .de_esser_band
-                    .apply(s5_l, de_ess_gain);
+                    .apply(s5_l, de_ess_gain, clarity_amt);
                 let out_r = self
                     .process_r
                     .dynamics_chain
                     .de_esser_band
-                    .apply(s5_r, de_ess_gain);
+                    .apply(s5_r, de_ess_gain, clarity_amt);
                 (out_l, out_r)
             };
 
@@ -1319,6 +1343,7 @@ impl VoiceStudioPlugin {
                     sidechain.speech_conf,
                     prox_amt,
                     clarity_amt,
+                    sidechain.integrity_score,
                 );
 
                 // Report pump detection to meters
@@ -1347,19 +1372,21 @@ impl VoiceStudioPlugin {
 
             // D. RECOVERY STAGE (speech-gated EQ after all subtractive processing)
             // Applies presence and air shelving during speech to compensate for losses
-            let (rec_l, rec_r) = self.recovery_stage.process(s7_l, s7_r, sidechain.speech_conf);
+            let (rec_l, rec_r) = self.recovery_stage.process(s7_l, s7_r, sidechain.speech_conf, sidechain.integrity_score);
 
             // E. SPECTRAL GUARDRAILS (safety layer before limiter)
             // Prevents extreme settings from breaking sound
             // Note: Applied after leveler to ensure gain reduction doesn't exceed limiter threshold
             let (s7g_l, s7g_r) =
                 self.spectral_guardrails
-                    .process(rec_l, rec_r, true, sidechain.speech_conf);
+                    .process(rec_l, rec_r, true, sidechain.speech_conf, sidechain.integrity_score);
 
             let (s8_l, s8_r) = if bypass_dynamics {
                 (s7g_l, s7g_r)
             } else {
-                let limiter_gain = self.linked_limiter.compute_gain(s7g_l, s7g_r);
+                let last_sidechain = self.speech_confidence.get_output();
+                let denoiser_reduction = self.denoiser.get_current_reduction();
+                let limiter_gain = self.linked_limiter.compute_gain(s7g_l, s7g_r, last_sidechain.speech_conf, denoiser_reduction);
                 (s7g_l * limiter_gain, s7g_r * limiter_gain)
             };
 
@@ -1604,6 +1631,8 @@ impl VoiceStudioPlugin {
             .set_debug_speech_confidence(last_sidechain.speech_conf);
         self.meters
             .set_debug_noise_floor_db(last_sidechain.noise_floor_db);
+        self.meters
+            .set_debug_integrity_score(last_sidechain.integrity_score);
 
         // De-esser gain reduction
         self.meters
@@ -1686,6 +1715,47 @@ impl VoiceStudioPlugin {
         }
 
         ProcessStatus::Normal
+    }
+
+    /// Calculates a single speech integrity score (0.0 = low integrity, 1.0 = high integrity)
+    /// based on various metrics from the DSP chain.
+    fn calculate_integrity_score(
+        &self,
+        speech_conf: f32,
+        confidence_slope: f32,
+        denoiser_reduction: f32,
+        early_reflection_suppression: f32,
+        expander_gr_db: f32,
+    ) -> f32 {
+        // Integrity rises when: confidence stable, harmonic energy present
+        let stability_factor = 1.0 - confidence_slope.abs() * 2.0; // Higher for stable, lower for changing
+        let harmonic_proxy = speech_conf * stability_factor.max(0.0);
+
+        // Integrity falls when: denoise reduction high, reflection suppression active, expander closing
+        let denoise_impact = denoiser_reduction * 0.6; // Increased weight for denoiser impact
+        let reflection_impact = early_reflection_suppression * 0.5; // Adjusted weight
+        let expander_impact = (expander_gr_db.abs() / 10.0).clamp(0.0, 1.0); // Normalize to 0-1 based on max 10dB reduction
+        let combined_reduction_impact = (denoise_impact + reflection_impact + expander_impact).min(1.0);
+
+        // Multiple subtractive modules firing together has a multiplicative effect
+        let multiple_modules_active = (denoise_impact > 0.3) as i32 +
+                                    (reflection_impact > 0.3) as i32 +
+                                    (expander_impact > 0.3) as i32;
+        let cascade_penalty = (multiple_modules_active - 1).max(0) as f32 * 0.2; // Penalty for multiple active modules
+
+        // Calculate base integrity
+        let base_integrity = (harmonic_proxy - combined_reduction_impact - cascade_penalty).max(0.0);
+
+        // Apply additional penalties when multiple subtractive processes are active
+        let integrity = if multiple_modules_active > 1 {
+            // Severe penalty when multiple subtractive modules are active ("death by a thousand cuts")
+            base_integrity * (1.0 - (multiple_modules_active as f32 - 1.0) * 0.3)
+        } else {
+            base_integrity
+        };
+
+        // Ensure integrity stays within bounds
+        integrity.clamp(0.0, 1.0)
     }
 }
 
