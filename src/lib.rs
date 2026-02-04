@@ -9,8 +9,9 @@ mod version;
 use crate::dsp::{
     Biquad, BreathReducer, ChannelProcessor, ClarityDetector, DeEsserDetector, DenoiseConfig,
     EarlyReflectionSuppressor, HissRumble, LinkedCompressor, LinkedLimiter, NoiseLearnRemove,
-    NoiseLearnRemoveConfig, PinkRefBias, PlosiveSoftener, ProfileAnalyzer, RecoveryStage, SpectralGuardrails,
-    SpeechConfidenceEstimator, SpeechExpander, SpeechHpf, StereoStreamingDenoiser,
+    NoiseLearnRemoveConfig, PinkRefBias, PlosiveSoftener, ProfileAnalyzer, RecoveryStage,
+    SpectralGuardrails, SpeechConfidenceEstimator, SpeechExpander, SpeechHpf,
+    StereoStreamingDenoiser,
 };
 use crate::macro_controller::{compute_simple_macro_targets, SimpleMacroTargets};
 use crate::meters::Meters;
@@ -315,6 +316,7 @@ struct VoiceStudioPlugin {
     ui_proxy: Arc<Mutex<Option<ContextProxy>>>,
     max_supported_block_size: usize,
     current_block_size: usize,
+    prev_speech_conf: f32,
 
     // Core DSP modules
     denoiser: StereoStreamingDenoiser,
@@ -601,6 +603,7 @@ impl Default for VoiceStudioPlugin {
             prev_loudness_comp_gain: 1.0,
             max_supported_block_size: 0,
             current_block_size: 0,
+            prev_speech_conf: 0.0,
         }
     }
 }
@@ -642,6 +645,7 @@ impl Plugin for VoiceStudioPlugin {
             self.sample_rate = buffer_config.sample_rate;
             self.max_supported_block_size = buffer_config.max_buffer_size as usize;
             self.current_block_size = buffer_config.max_buffer_size as usize;
+            self.prev_speech_conf = 0.0;
             self.process_l = ChannelProcessor::new(2048, 512, self.sample_rate);
             self.process_r = ChannelProcessor::new(2048, 512, self.sample_rate);
 
@@ -1066,6 +1070,8 @@ impl VoiceStudioPlugin {
             // 0d. SPEECH CONFIDENCE (sidechain analysis - no audio modification)
             // Must be computed from HPF, not noise-reduced audio
             let sidechain = self.speech_confidence.process(hpf_l, hpf_r);
+            let confidence_slope = sidechain.speech_conf - self.prev_speech_conf;
+            self.prev_speech_conf = sidechain.speech_conf;
 
             // 0x. NOISE LEARN REMOVE (Static Noise)
             // Independent of speech, works during silence
@@ -1123,6 +1129,11 @@ impl VoiceStudioPlugin {
                 )
             };
 
+            let early_reflection_suppression = self
+                .early_reflection_l
+                .get_suppression()
+                .max(self.early_reflection_r.get_suppression());
+
             // 2. SPEECH EXPANDER (after early reflection, before denoise)
             // Controls pauses and room swell without hard gating
             let expander_amt = (reverb_amt * 0.6).clamp(0.0, 1.0);
@@ -1133,6 +1144,8 @@ impl VoiceStudioPlugin {
                 self.speech_expander
                     .process(pre_l, pre_r, expander_amt, &sidechain, &env_l, &env_r)
             };
+
+            let expander_gr_db = self.speech_expander.get_gain_reduction_db();
 
             // 3. PINK REFERENCE BIAS (Hidden Spectral Tonal Conditioning)
             // Gently nudges speech towards -3dB/oct tilt to improve stability.
@@ -1159,6 +1172,12 @@ impl VoiceStudioPlugin {
                 // Denoiser tone is now just 0.5 (neutral) as Hiss/Rumble handles bias
                 cfg.tone = 0.5;
                 self.denoiser.process_sample(bias_l, bias_r, &cfg)
+            };
+
+            let denoiser_reduction = if bypass_restoration {
+                0.0
+            } else {
+                self.denoiser.get_current_reduction()
             };
 
             // 4. PLOSIVE SOFTENER (after denoise, before breath)
@@ -1347,7 +1366,17 @@ impl VoiceStudioPlugin {
 
             // D. RECOVERY STAGE (speech-gated EQ after all subtractive processing)
             // Applies presence and air shelving during speech to compensate for losses
-            let (rec_l, rec_r) = self.recovery_stage.process(s7_l, s7_r, sidechain.speech_conf);
+            let integrity_score = self.calculate_integrity_score(
+                sidechain.speech_conf,
+                confidence_slope,
+                denoiser_reduction,
+                early_reflection_suppression,
+                expander_gr_db,
+            );
+
+            let (rec_l, rec_r) =
+                self.recovery_stage
+                    .process(s7_l, s7_r, sidechain.speech_conf, integrity_score);
 
             // E. SPECTRAL GUARDRAILS (safety layer before limiter)
             // Prevents extreme settings from breaking sound
@@ -1686,6 +1715,39 @@ impl VoiceStudioPlugin {
         }
 
         ProcessStatus::Normal
+    }
+
+    fn calculate_integrity_score(
+        &self,
+        speech_conf: f32,
+        confidence_slope: f32,
+        denoiser_reduction: f32,
+        early_reflection_suppression: f32,
+        expander_gr_db: f32,
+    ) -> f32 {
+        let stability_factor = 1.0 - confidence_slope.abs() * 2.0;
+        let harmonic_proxy = speech_conf * stability_factor.max(0.0);
+
+        let denoise_impact = denoiser_reduction * 0.6;
+        let reflection_impact = early_reflection_suppression * 0.5;
+        let expander_impact = (expander_gr_db.abs() / 10.0).clamp(0.0, 1.0);
+        let combined_reduction_impact =
+            (denoise_impact + reflection_impact + expander_impact).min(1.0);
+
+        let multiple_modules_active = (denoise_impact > 0.3) as i32
+            + (reflection_impact > 0.3) as i32
+            + (expander_impact > 0.3) as i32;
+        let cascade_penalty = (multiple_modules_active - 1).max(0) as f32 * 0.2;
+
+        let base_integrity =
+            (harmonic_proxy - combined_reduction_impact - cascade_penalty).max(0.0);
+        let integrity = if multiple_modules_active > 1 {
+            base_integrity * (1.0 - (multiple_modules_active as f32 - 1.0) * 0.3)
+        } else {
+            base_integrity
+        };
+
+        integrity.clamp(0.0, 1.0)
     }
 }
 

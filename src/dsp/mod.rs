@@ -51,6 +51,7 @@ pub mod speech_confidence;
 pub mod speech_expander;
 pub mod speech_hpf;
 pub mod utils;
+pub mod recovery_stage;
 pub use noise_learn_remove::{NoiseLearnRemove, NoiseLearnRemoveConfig};
 
 pub use biquad::Biquad;
@@ -73,6 +74,7 @@ pub use spectral_guardrails::SpectralGuardrails;
 pub use speech_confidence::SpeechConfidenceEstimator;
 pub use speech_expander::SpeechExpander;
 pub use speech_hpf::SpeechHpf;
+pub use recovery_stage::RecoveryStage;
 
 /// Lifecycle state model for DSP modules.
 /// Ensures predictable behavior during training, active processing, and bypassing.
