@@ -9,8 +9,9 @@ mod version;
 use crate::dsp::{
     Biquad, BreathReducer, ChannelProcessor, ClarityDetector, DeEsserDetector, DenoiseConfig,
     EarlyReflectionSuppressor, HissRumble, LinkedCompressor, LinkedLimiter, NoiseLearnRemove,
-    NoiseLearnRemoveConfig, PinkRefBias, PlosiveSoftener, ProfileAnalyzer, RecoveryStage, SpectralGuardrails,
-    SpeechConfidenceEstimator, SpeechExpander, SpeechHpf, StereoStreamingDenoiser,
+    NoiseLearnRemoveConfig, PinkRefBias, PlosiveSoftener, ProfileAnalyzer, RecoveryStage,
+    SpectralGuardrails, SpeechConfidenceEstimator, SpeechExpander, SpeechHpf,
+    StereoStreamingDenoiser,
 };
 use crate::macro_controller::{compute_simple_macro_targets, SimpleMacroTargets};
 use crate::meters::Meters;
@@ -343,6 +344,7 @@ struct VoiceStudioPlugin {
 
     // State for noise learning toggle
     noise_learning_active: bool,
+    prev_learn_pressed: bool,
 
     // Speech band energy protection (300Hz - 3kHz)
     speech_band_pre_l: Biquad,
@@ -557,6 +559,7 @@ impl Default for VoiceStudioPlugin {
             breath_reducer_r: BreathReducer::new(DEFAULT_SAMPLE_RATE),
 
             noise_learning_active: false,
+            prev_learn_pressed: false,
 
             speech_band_pre_l: Biquad::new(),
             speech_band_pre_r: Biquad::new(),
@@ -676,6 +679,7 @@ impl Plugin for VoiceStudioPlugin {
             self.breath_reducer_r = BreathReducer::new(self.sample_rate);
 
             self.noise_learning_active = false;
+            self.prev_learn_pressed = false;
 
             // Speech band: 300Hz HPF + 3kHz LPF
             self.speech_band_pre_l
@@ -793,6 +797,7 @@ impl Plugin for VoiceStudioPlugin {
             self.breath_reducer_l.reset();
             self.breath_reducer_r.reset();
             self.noise_learning_active = false;
+            self.prev_learn_pressed = false;
             self.input_profile_analyzer.reset();
             self.output_profile_analyzer.reset();
             self.meters.reset();
@@ -1083,10 +1088,11 @@ impl VoiceStudioPlugin {
                 sidechain.speech_conf,
                 sidechain.confidence_slope,
                 self.denoiser.get_current_reduction(), // Denoise reduction
-                self.early_reflection_l.get_suppression().max(self.early_reflection_r.get_suppression()), // Early reflection suppression
+                self.early_reflection_l
+                    .get_suppression()
+                    .max(self.early_reflection_r.get_suppression()), // Early reflection suppression
                 expander_gr_db,
             );
-
 
             // 0x. NOISE LEARN REMOVE (Static Noise)
             // Independent of speech, works during silence
@@ -1094,16 +1100,14 @@ impl VoiceStudioPlugin {
             let learn_pressed = self.params.noise_learn_trigger.value();
             let clear_pressed = self.params.noise_learn_clear.value();
 
-            // Clear button should stop learning and clear the profile
+            // Clear button stops learning and clears the profile.
+            // Learn button toggles on rising edge only.
             if clear_pressed {
                 self.noise_learning_active = false;
-            } else if learn_pressed && !self.noise_learning_active {
-                // Button was just pressed, start learning
-                self.noise_learning_active = true;
-            } else if !learn_pressed && self.noise_learning_active {
-                // Button was just released, stop learning
-                self.noise_learning_active = false;
+            } else if learn_pressed && !self.prev_learn_pressed {
+                self.noise_learning_active = !self.noise_learning_active;
             }
+            self.prev_learn_pressed = learn_pressed;
 
             let nlr_cfg = NoiseLearnRemoveConfig {
                 enabled: self.params.noise_learn_amount.value() > 0.001,
@@ -1167,8 +1171,15 @@ impl VoiceStudioPlugin {
             let (exp_l, exp_r) = if expander_amt < 0.001 {
                 (pre_l, pre_r)
             } else {
-                self.speech_expander
-                    .process(pre_l, pre_r, expander_amt, &sidechain, denoiser_reduction, &env_l, &env_r)
+                self.speech_expander.process(
+                    pre_l,
+                    pre_r,
+                    expander_amt,
+                    &sidechain,
+                    denoiser_reduction,
+                    &env_l,
+                    &env_r,
+                )
             };
 
             // 3. PINK REFERENCE BIAS (Hidden Spectral Tonal Conditioning)
@@ -1276,7 +1287,9 @@ impl VoiceStudioPlugin {
                 self.clarity_detector.analyze(s4_l, s4_r)
             };
             let denoiser_reduction = self.denoiser.get_current_reduction();
-            let early_reflection_avg_suppression = 0.5 * (self.early_reflection_l.get_suppression() + self.early_reflection_r.get_suppression());
+            let early_reflection_avg_suppression = 0.5
+                * (self.early_reflection_l.get_suppression()
+                    + self.early_reflection_r.get_suppression());
             let (s5_l, s5_r) = if bypass_shaping {
                 (s4_l, s4_r)
             } else {
@@ -1309,19 +1322,26 @@ impl VoiceStudioPlugin {
             let (s6_l, s6_r) = if bypass_dynamics {
                 (s5_l, s5_r)
             } else {
-                let de_ess_gain = self
-                    .linked_de_esser
-                    .compute_gain(s5_l, s5_r, de_ess_amt, sidechain.confidence_slope, denoiser_reduction, &env_l, &env_r, sidechain.integrity_score);
-                let out_l = self
-                    .process_l
-                    .dynamics_chain
-                    .de_esser_band
-                    .apply(s5_l, de_ess_gain, clarity_amt);
-                let out_r = self
-                    .process_r
-                    .dynamics_chain
-                    .de_esser_band
-                    .apply(s5_r, de_ess_gain, clarity_amt);
+                let de_ess_gain = self.linked_de_esser.compute_gain(
+                    s5_l,
+                    s5_r,
+                    de_ess_amt,
+                    sidechain.confidence_slope,
+                    denoiser_reduction,
+                    &env_l,
+                    &env_r,
+                    sidechain.integrity_score,
+                );
+                let out_l = self.process_l.dynamics_chain.de_esser_band.apply(
+                    s5_l,
+                    de_ess_gain,
+                    clarity_amt,
+                );
+                let out_r = self.process_r.dynamics_chain.de_esser_band.apply(
+                    s5_r,
+                    de_ess_gain,
+                    clarity_amt,
+                );
                 (out_l, out_r)
             };
 
@@ -1395,20 +1415,34 @@ impl VoiceStudioPlugin {
 
             // D. SPECTRAL GUARDRAILS (safety layer, runs before recovery)
             // Prevents extreme settings from breaking sound
-            let (s7g_l, s7g_r) =
-                self.spectral_guardrails
-                    .process(s7_l, s7_r, true, sidechain.speech_conf, sidechain.integrity_score);
+            let (s7g_l, s7g_r) = self.spectral_guardrails.process(
+                s7_l,
+                s7_r,
+                true,
+                sidechain.speech_conf,
+                sidechain.integrity_score,
+            );
 
             // E. RECOVERY STAGE (speech-gated EQ, after guardrails so it cannot be undone)
             // Restores presence and air lost to earlier subtractive stages
-            let (rec_l, rec_r) = self.recovery_stage.process(s7g_l, s7g_r, sidechain.speech_conf, sidechain.integrity_score);
+            let (rec_l, rec_r) = self.recovery_stage.process(
+                s7g_l,
+                s7g_r,
+                sidechain.speech_conf,
+                sidechain.integrity_score,
+            );
 
             let (s8_l, s8_r) = if bypass_dynamics {
                 (rec_l, rec_r)
             } else {
                 let last_sidechain = self.speech_confidence.get_output();
                 let denoiser_reduction = self.denoiser.get_current_reduction();
-                let limiter_gain = self.linked_limiter.compute_gain(rec_l, rec_r, last_sidechain.speech_conf, denoiser_reduction);
+                let limiter_gain = self.linked_limiter.compute_gain(
+                    rec_l,
+                    rec_r,
+                    last_sidechain.speech_conf,
+                    denoiser_reduction,
+                );
                 (rec_l * limiter_gain, rec_r * limiter_gain)
             };
 
@@ -1758,16 +1792,18 @@ impl VoiceStudioPlugin {
         let denoise_impact = denoiser_reduction * 0.6; // Increased weight for denoiser impact
         let reflection_impact = early_reflection_suppression * 0.5; // Adjusted weight
         let expander_impact = (expander_gr_db.abs() / 10.0).clamp(0.0, 1.0); // Normalize to 0-1 based on max 10dB reduction
-        let combined_reduction_impact = (denoise_impact + reflection_impact + expander_impact).min(1.0);
+        let combined_reduction_impact =
+            (denoise_impact + reflection_impact + expander_impact).min(1.0);
 
         // Multiple subtractive modules firing together has a multiplicative effect
-        let multiple_modules_active = (denoise_impact > 0.3) as i32 +
-                                    (reflection_impact > 0.3) as i32 +
-                                    (expander_impact > 0.3) as i32;
+        let multiple_modules_active = (denoise_impact > 0.3) as i32
+            + (reflection_impact > 0.3) as i32
+            + (expander_impact > 0.3) as i32;
         let cascade_penalty = (multiple_modules_active - 1).max(0) as f32 * 0.2; // Penalty for multiple active modules
 
         // Calculate base integrity
-        let base_integrity = (harmonic_proxy - combined_reduction_impact - cascade_penalty).max(0.0);
+        let base_integrity =
+            (harmonic_proxy - combined_reduction_impact - cascade_penalty).max(0.0);
 
         // Apply additional penalties when multiple subtractive processes are active
         let integrity = if multiple_modules_active > 1 {
