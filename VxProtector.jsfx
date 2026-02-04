@@ -1,0 +1,118 @@
+desc:VxProtector v1.5 (Fixed Function Ordering)
+// Final precise replication of Voice Studio's "Always-On" behavior.
+// Fixed: Function definitions moved to top to prevent "undefined" errors.
+
+slider1:100<0,100,1>Protect & Clean (%)
+
+@init
+sr = srate;
+eps = 0.000001;
+
+// --- Function Definitions (Must be at the top) ---
+function biquad_hpf(f0, q) (
+  w0 = 2 * $pi * f0 / sr; cosw0 = cos(w0); alpha = sin(w0) / (2 * q);
+  b0 = (1 + cosw0) / 2; b1 = -(1 + cosw0); b2 = (1 + cosw0) / 2;
+  a0 = 1 + alpha; a1 = -2 * cosw0; a2 = 1 - alpha;
+  this.b0 = b0 / a0; this.b1 = b1 / a0; this.b2 = b2 / a0; this.a1 = a1 / a0; this.a2 = a2 / a0;
+);
+
+function biquad_lpf(f0, q) (
+  w0 = 2 * $pi * f0 / sr; cosw0 = cos(w0); alpha = sin(w0) / (2 * q);
+  b0 = (1 - cosw0) / 2; b1 = 1 - cosw0; b2 = (1 - cosw0) / 2;
+  a0 = 1 + alpha; a1 = -2 * cosw0; a2 = 1 - alpha;
+  this.b0 = b0 / a0; this.b1 = b1 / a0; this.b2 = b2 / a0; this.a1 = a1 / a0; this.a2 = a2 / a0;
+);
+
+function biquad_lowshelf(f0, q, g_db) (
+  A = 10^(g_db/40); w0 = 2 * $pi * f0 / sr; cosw0 = cos(w0); alpha = sin(w0) / (2 * q);
+  b0 = A*((A+1)-(A-1)*cosw0+2*sqrt(A)*alpha); b1 = 2*A*((A-1)-(A+1)*cosw0); b2 = A*((A+1)-(A-1)*cosw0-2*sqrt(A)*alpha);
+  a0 = (A+1)+(A-1)*cosw0+2*sqrt(A)*alpha; a1 = -2*((A-1)+(A+1)*cosw0); a2 = (A+1)+(A-1)*cosw0-2*sqrt(A)*alpha;
+  this.b0 = b0 / a0; this.b1 = b1 / a0; this.b2 = b2 / a0; this.a1 = a1 / a0; this.a2 = a2 / a0;
+);
+
+function biquad_highshelf(f0, q, g_db) (
+  A = 10^(g_db/40); w0 = 2 * $pi * f0 / sr; cosw0 = cos(w0); alpha = sin(w0) / (2 * q);
+  b0 = A*((A+1)+(A-1)*cosw0+2*sqrt(A)*alpha); b1 = -2*A*((A-1)+(A+1)*cosw0); b2 = A*((A+1)-(A-1)*cosw0-2*sqrt(A)*alpha);
+  a0 = (A+1)-(A-1)*cosw0+2*sqrt(A)*alpha; a1 = 2*((A-1)-(A+1)*cosw0); a2 = (A+1)-(A-1)*cosw0-2*sqrt(A)*alpha;
+  this.b0 = b0 / a0; this.b1 = b1 / a0; this.b2 = b2 / a0; this.a1 = a1 / a0; this.a2 = a2 / a0;
+);
+
+function biquad_process(x) (
+  y = this.b0*x + this.b1*this.x1 + this.b2*this.x2 - this.a1*this.y1 - this.a2*this.y2;
+  this.x2 = this.x1; this.x1 = x; this.y2 = this.y1; this.y1 = y; y;
+);
+
+// --- Initialization ---
+hpf_l.biquad_hpf(90, 0.707); hpf_r.biquad_hpf(90, 0.707);
+plosive_l.biquad_lowshelf(150, 0.707, 0); plosive_r.biquad_lowshelf(150, 0.707, 0);
+shelf_lo_l.biquad_lowshelf(250, 0.707, 0); shelf_lo_r.biquad_lowshelf(250, 0.707, 0);
+shelf_hi_l.biquad_highshelf(4000, 0.707, 0); shelf_hi_r.biquad_highshelf(4000, 0.707, 0);
+presence_l.biquad_highshelf(5000, 0.707, 0); presence_r.biquad_highshelf(5000, 0.707, 0);
+air_l.biquad_highshelf(10000, 0.707, 0); air_r.biquad_highshelf(10000, 0.707, 0);
+
+band_sp_l.biquad_hpf(250, 0.707); band_sp_r.biquad_hpf(250, 0.707);
+band_hi_l.biquad_hpf(4000, 0.707); band_hi_r.biquad_hpf(4000, 0.707);
+band_lo_l.biquad_hpf(200, 0.707); band_lo_r.biquad_hpf(200, 0.707);
+band_lo_lp_l.biquad_lpf(500, 0.707); band_lo_lp_r.biquad_lpf(500, 0.707);
+
+// --- Ballistics ---
+sc_atk = 1 - exp(-1 / (sr * 0.015));
+sc_rel = 1 - exp(-1 / (sr * 0.120));
+bias_alpha = 1 - exp(-1 / (sr * 2.0));  
+lcomp_alpha = 1 - exp(-1 / (sr * 10.0));
+pl_atk = 1 - exp(-1 / (sr * 0.001)); pl_rel = 1 - exp(-1 / (sr * 0.020));
+lim_atk = 1 - exp(-1 / (sr * 0.0005)); lim_rel = 1 - exp(-1 / (sr * 0.400));
+lim_gain = 1; ceiling = 0.98;
+
+@sample
+wet = slider1 / 100; dry = 1 - wet;
+in0 = spl0; in1 = spl1;
+
+// 1. SPEECH ANALYSIS
+m_in = 0.5 * (in0 + in1);
+sp_m = 0.5 * (band_sp_l.biquad_process(in0) + band_sp_r.biquad_process(in1));
+lo_m = 0.5 * (band_lo_lp_l.biquad_process(band_lo_l.biquad_process(in0)) + band_lo_lp_r.biquad_process(band_lo_r.biquad_process(in1)));
+rms_m = 0.99 * rms_m + 0.01 * (m_in*m_in); rms_sp = 0.99 * rms_sp + 0.01 * (sp_m*sp_m); rms_lo = 0.99 * rms_lo + 0.01 * (lo_m*lo_m);
+raw_sc = (sqrt(rms_sp) / (sqrt(rms_m) + eps) > 0.4) ? 1 : 0;
+raw_sc > sc_env ? sc_env += (raw_sc - sc_env) * sc_atk : sc_env += (raw_sc - sc_env) * sc_rel;
+slope = sc_env - prev_sc; prev_sc = sc_env;
+integrity = sc_env * max(0, 1 - abs(slope) * 2.0);
+
+// 2. HYGIENE
+s1_0 = hpf_l.biquad_process(in0); s1_1 = hpf_r.biquad_process(in1);
+p_env = 0.5 * (abs(s1_0) + abs(s1_1));
+p_env > pl_env ? pl_env += (p_env - pl_env) * pl_atk : pl_env += (p_env - pl_env) * pl_rel;
+p_target = min(8, max(0, (pl_env - prev_pl_env) - 0.05) * 20) * (1 - sc_env * 0.3);
+prev_pl_env = pl_env;
+abs(p_target - cur_p_red) > 0.1 ? ( cur_p_red = p_target; plosive_l.biquad_lowshelf(150, 0.707, -cur_p_red); plosive_r.biquad_lowshelf(150, 0.707, -cur_p_red); );
+s2_0 = plosive_l.biquad_process(s1_0); s2_1 = plosive_r.biquad_process(s1_1);
+
+// 3. TONAL NUDGE (Pink Bias & Mud Guardrail)
+t_lo = (sqrt(rms_lo)/(sqrt(rms_sp)+eps) > 1.8) ? -4 : ( (sqrt(rms_lo)/(sqrt(rms_sp)+eps) > 1.4) ? -1.5 : 1.5 );
+t_lo *= sc_env; bias_lo += (t_lo - bias_lo) * bias_alpha;
+abs(bias_lo - cur_lo) > 0.1 ? ( cur_lo = bias_lo; shelf_lo_l.biquad_lowshelf(250, 0.707, cur_lo); shelf_lo_r.biquad_lowshelf(250, 0.707, cur_lo); );
+s3_0 = shelf_lo_l.biquad_process(s2_0); s3_1 = shelf_lo_r.biquad_process(s2_1);
+
+// 4. RECOVERY (The "Seesaw")
+recovery_active = (sc_env >= 0.6) ? 1.0 : ( (sc_env <= 0.3) ? 0.0 : (sc_env - 0.3)/0.3 );
+recovery_active *= integrity;
+rec_p = 1.5 + (2.5 - 1.5) * recovery_active;
+rec_a = 2.0 + (4.0 - 2.0) * recovery_active;
+abs(rec_p - cur_p) > 0.1 ? ( cur_p = rec_p; presence_l.biquad_highshelf(5000, 0.707, cur_p); presence_r.biquad_highshelf(5000, 0.707, cur_p); );
+abs(rec_a - cur_a) > 0.1 ? ( cur_a = rec_a; air_l.biquad_highshelf(10000, 0.707, cur_a); air_r.biquad_highshelf(10000, 0.707, cur_a); );
+s4_0 = air_l.biquad_process(presence_l.biquad_process(s3_0)); s4_1 = air_r.biquad_process(presence_r.biquad_process(s3_1));
+
+// 5. LOUDNESS & SAFETY
+in_q = lcomp_alpha * in_q + (1-lcomp_alpha) * (0.5*(in0*in0 + in1*in1));
+out_q = lcomp_alpha * out_q + (1-lcomp_alpha) * (0.5*(s4_0*s4_0 + s4_1*s4_1));
+l_target = (in_q > eps && out_q > eps) ? min(1.2, max(0.8, sqrt(in_q / out_q))) : 1;
+l_smooth += (l_target - l_smooth) * (1-exp(-1/(sr*2)));
+s5_0 = s4_0 * l_smooth; s5_1 = s4_1 * l_smooth;
+
+pk = max(abs(s5_0), abs(s5_1));
+pk > lim_env ? lim_env += (pk - lim_env) * lim_atk : lim_env += (pk - lim_env) * lim_rel;
+lim_g = (lim_env > ceiling) ? ceiling / lim_env : 1;
+lim_gain += (lim_g - lim_gain) * 0.05;
+
+spl0 = in0 * dry + s5_0 * lim_gain * wet;
+spl1 = in1 * dry + s5_1 * lim_gain * wet;

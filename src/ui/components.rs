@@ -9,14 +9,14 @@
 //! All builders use consistent patterns with nih_plug's ParamSlider for binding
 //! to plugin parameters. Styling is handled via CSS classes defined in ui.css.
 
+use crate::ui::state::set_macro_mode;
+use crate::VoiceParams;
 use nih_plug::params::Param;
 use nih_plug::prelude::{GuiContext, ParamSetter};
 use nih_plug_vizia::vizia::prelude::*;
-use nih_plug_vizia::widgets::*;
 use nih_plug_vizia::widgets::param_base::ParamWidgetBase;
+use nih_plug_vizia::widgets::*;
 use std::sync::Arc;
-use crate::VoiceParams;
-use crate::ui::state::set_macro_mode;
 
 #[derive(Clone, Copy, PartialEq, Data)]
 pub enum ParamId {
@@ -131,17 +131,21 @@ where
             SliderVisuals::new(cx, params.clone(), id).class("fill-both");
 
             // Value display (centered in slider)
-            let lens = ParamWidgetBase::make_lens(crate::ui::state::VoiceStudioData::params, map, |p: &P| {
-                p.normalized_value_to_string(p.unmodulated_normalized_value(), true)
-            });
+            let lens = ParamWidgetBase::make_lens(
+                crate::ui::state::VoiceStudioData::params,
+                map,
+                |p: &P| p.normalized_value_to_string(p.unmodulated_normalized_value(), true),
+            );
             Label::new(cx, lens)
                 .class("slider-value")
                 .class("adv-value")
                 .hoverable(false);
 
-            ParamSlider::new(cx, crate::ui::state::VoiceStudioData::params, move |p| map(p))
-                .class("fill-both")
-                .class("input-hidden");
+            ParamSlider::new(cx, crate::ui::state::VoiceStudioData::params, move |p| {
+                map(p)
+            })
+            .class("fill-both")
+            .class("input-hidden");
         })
         .class("slider-visual")
         .class("adv-slider")
@@ -175,16 +179,20 @@ where
             DialVisuals::new(cx, params.clone(), id).class("fill-both");
 
             // Value display (centered in dial)
-            let lens = ParamWidgetBase::make_lens(crate::ui::state::VoiceStudioData::params, map, |p: &P| {
-                p.normalized_value_to_string(p.unmodulated_normalized_value(), true)
-            });
+            let lens = ParamWidgetBase::make_lens(
+                crate::ui::state::VoiceStudioData::params,
+                map,
+                |p: &P| p.normalized_value_to_string(p.unmodulated_normalized_value(), true),
+            );
             Label::new(cx, lens).class("dial-value").hoverable(false);
 
             // Interactive slider (in front, invisible)
-            ParamSlider::new(cx, crate::ui::state::VoiceStudioData::params, move |p| map(p))
-                .class("fill-both")
-                .class("input-hidden")
-                .z_index(1);
+            ParamSlider::new(cx, crate::ui::state::VoiceStudioData::params, move |p| {
+                map(p)
+            })
+            .class("fill-both")
+            .class("input-hidden")
+            .z_index(1);
         })
         .class("dial-visual");
     })
@@ -410,16 +418,29 @@ impl View for SliderVisuals {
 
         let mut bg = nih_plug_vizia::vizia::vg::Path::new();
         bg.rounded_rect(b.x, b.y, b.w, b.h, 3.0);
-        canvas.fill_path(&bg, &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(30, 41, 59)));
+        canvas.fill_path(
+            &bg,
+            &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(
+                30, 41, 59,
+            )),
+        );
         canvas.stroke_path(
             &bg,
-            &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(51, 65, 85)).with_line_width(1.0),
+            &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(
+                51, 65, 85,
+            ))
+            .with_line_width(1.0),
         );
 
         if val > 0.0 {
             let mut f = nih_plug_vizia::vizia::vg::Path::new();
             f.rounded_rect(b.x, b.y, b.w * val, b.h, 3.0);
-            canvas.fill_path(&f, &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgba(59, 130, 246, 200)));
+            canvas.fill_path(
+                &f,
+                &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgba(
+                    59, 130, 246, 200,
+                )),
+            );
         }
     }
 }
@@ -461,12 +482,21 @@ impl View for DialVisuals {
         let current_angle = start_angle + (end_angle - start_angle) * val;
 
         let mut track = nih_plug_vizia::vizia::vg::Path::new();
-        track.arc(cx0, cy0, radius, start_angle, end_angle, nih_plug_vizia::vizia::vg::Solidity::Hole);
+        track.arc(
+            cx0,
+            cy0,
+            radius,
+            start_angle,
+            end_angle,
+            nih_plug_vizia::vizia::vg::Solidity::Hole,
+        );
         canvas.stroke_path(
             &track,
-            &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(30, 41, 59))
-                .with_line_width(8.0)
-                .with_line_cap(nih_plug_vizia::vizia::vg::LineCap::Round),
+            &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(
+                30, 41, 59,
+            ))
+            .with_line_width(8.0)
+            .with_line_cap(nih_plug_vizia::vizia::vg::LineCap::Round),
         );
 
         let mut active = nih_plug_vizia::vizia::vg::Path::new();
@@ -480,18 +510,28 @@ impl View for DialVisuals {
         );
         canvas.stroke_path(
             &active,
-            &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(59, 130, 246))
-                .with_line_width(8.0)
-                .with_line_cap(nih_plug_vizia::vizia::vg::LineCap::Round),
+            &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(
+                59, 130, 246,
+            ))
+            .with_line_width(8.0)
+            .with_line_cap(nih_plug_vizia::vizia::vg::LineCap::Round),
         );
 
         let knob_radius = size * 0.32;
         let mut knob = nih_plug_vizia::vizia::vg::Path::new();
         knob.circle(cx0, cy0, knob_radius);
-        canvas.fill_path(&knob, &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(15, 23, 42)));
+        canvas.fill_path(
+            &knob,
+            &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(
+                15, 23, 42,
+            )),
+        );
         canvas.stroke_path(
             &knob,
-            &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(51, 65, 85)).with_line_width(2.0),
+            &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::rgb(
+                51, 65, 85,
+            ))
+            .with_line_width(2.0),
         );
 
         let marker_radius = 3.0;
@@ -501,6 +541,9 @@ impl View for DialVisuals {
 
         let mut marker = nih_plug_vizia::vizia::vg::Path::new();
         marker.circle(mx, my, marker_radius);
-        canvas.fill_path(&marker, &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::white()));
+        canvas.fill_path(
+            &marker,
+            &nih_plug_vizia::vizia::vg::Paint::color(nih_plug_vizia::vizia::vg::Color::white()),
+        );
     }
 }

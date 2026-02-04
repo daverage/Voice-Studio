@@ -112,7 +112,11 @@ pub fn estimate_f0_autocorr(frame: &[f32], scratch: &mut Vec<f32>, sample_rate: 
     }
 
     // Ensure scratch buffer is the right size to avoid allocation in audio thread
-    debug_assert_eq!(scratch.len(), n, "scratch must be pre-sized to frame length");
+    debug_assert_eq!(
+        scratch.len(),
+        n,
+        "scratch must be pre-sized to frame length"
+    );
     if scratch.len() != n {
         return (0.0, 0.0);
     }

@@ -32,6 +32,11 @@ impl StereoStreamingDenoiser {
     pub fn reset(&mut self) {
         self.dsp_denoiser.reset();
     }
+
+    /// Returns the current average gain reduction applied by the denoiser.
+    pub fn get_current_reduction(&self) -> f32 {
+        self.dsp_denoiser.get_current_reduction()
+    }
 }
 
 pub use crate::dsp::dsp_denoiser::DenoiseConfig;

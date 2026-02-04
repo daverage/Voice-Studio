@@ -353,6 +353,7 @@ struct DspDenoiserDetector {
     noise_confidence: f32,
     prev_rms: f32,
     transient_hold: i32,
+    current_average_reduction: f32,
 }
 
 impl DspDenoiserDetector {
@@ -404,6 +405,7 @@ impl DspDenoiserDetector {
             noise_confidence: 1.0,
             prev_rms: 0.0,
             transient_hold: 0,
+            current_average_reduction: 0.0,
         }
     }
 
@@ -709,9 +711,12 @@ impl DspDenoiserDetector {
             self.apply_harmonic_protection(sr, f0_hz, global_spp, effective_amt);
         }
 
+        let mut total_reduction = 0.0;
         for i in 0..=nyq {
+            total_reduction += 1.0 - self.gain_buf[i];
             self.prev_spec[i] = self.scratch[i];
         }
+        self.current_average_reduction = total_reduction / (nyq as f32 + 1.0);
 
         &self.gain_buf
     }
@@ -950,12 +955,21 @@ impl DspDenoiserDetector {
             harm_num += 1;
         }
     }
+
+    pub fn get_current_reduction(&self) -> f32 {
+        self.current_average_reduction
+    }
 }
 
 impl DspDenoiser {
     pub fn reset(&mut self) {
         self.chan_l.reset();
         self.chan_r.reset();
+    }
+
+    /// Returns the current average gain reduction applied by the denoiser (0.0 to 1.0)
+    pub fn get_current_reduction(&self) -> f32 {
+        self.detector.get_current_reduction()
     }
 }
 

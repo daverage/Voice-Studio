@@ -6,13 +6,13 @@
 //! - Clean & Repair: Static and adaptive noise reduction
 //! - Shape & Polish: Proximity and clarity shaping
 
+use crate::meters::Meters;
+use crate::ui::components::{create_momentary_button, create_slider};
+use crate::ui::ParamId;
+use crate::VoiceParams;
 use nih_plug::prelude::GuiContext;
 use nih_plug_vizia::vizia::prelude::*;
 use std::sync::Arc;
-use crate::VoiceParams;
-use crate::meters::Meters;
-use crate::ui::ParamId;
-use crate::ui::components::{create_slider, create_momentary_button};
 
 pub fn build_clean_repair_tab(
     cx: &mut Context,
@@ -65,21 +65,13 @@ pub fn build_clean_repair_tab(
 
                 HStack::new(cx, |cx| {
                     HStack::new(cx, |cx| {
-                        create_momentary_button(
-                            cx,
-                            "Learn",
-                            params.clone(),
-                            gui.clone(),
-                            |p| &p.noise_learn_trigger,
-                        );
+                        create_momentary_button(cx, "Learn", params.clone(), gui.clone(), |p| {
+                            &p.noise_learn_trigger
+                        });
 
-                        create_momentary_button(
-                            cx,
-                            "Clear",
-                            params.clone(),
-                            gui.clone(),
-                            |p| &p.noise_learn_clear,
-                        );
+                        create_momentary_button(cx, "Clear", params.clone(), gui.clone(), |p| {
+                            &p.noise_learn_clear
+                        });
                     })
                     .class("output-actions");
 

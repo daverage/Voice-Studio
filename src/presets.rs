@@ -48,8 +48,9 @@ impl DspPreset {
             DspPreset::Manual => "Custom settings - no preset applied",
             DspPreset::PodcastNoisy => "Optimized for podcasts recorded in noisy environments",
             DspPreset::VoiceoverStudio => "Balanced settings for studio voiceover work",
-            DspPreset::MudFree =>
-                "Reduces low-mid muddiness while preserving body and natural presence",
+            DspPreset::MudFree => {
+                "Reduces low-mid muddiness while preserving body and natural presence"
+            }
             DspPreset::InterviewOutdoor => "Aggressive cleanup for outdoor/field recordings",
             DspPreset::BroadcastClean => "Minimal processing for professional broadcast audio",
         }

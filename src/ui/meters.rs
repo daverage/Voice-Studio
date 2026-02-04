@@ -3,10 +3,10 @@
 //! This module provides custom Vizia widgets for displaying meter data.
 //! The underlying data storage is defined in `crate::meters`.
 
+use crate::meters::Meters;
 use nih_plug_vizia::vizia::prelude::*;
 use nih_plug_vizia::vizia::vg;
 use std::sync::Arc;
-use crate::meters::Meters;
 
 // ============================================================================
 // CUSTOM METER WIDGETS

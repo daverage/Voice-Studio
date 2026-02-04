@@ -5,16 +5,19 @@
 //! - Body with levels, macro/advanced sections, and output
 //! - Footer with help, reset, and debug buttons
 
+use crate::meters::Meters;
+use crate::ui::advanced::{build_clean_repair_tab, build_shape_polish_tab};
+use crate::ui::components::{
+    create_button, create_dropdown, create_dsp_preset_dropdown, create_macro_dial, create_slider,
+    create_toggle_button,
+};
+use crate::ui::state::{AdvancedTab, AdvancedTabEvent, VoiceStudioData};
+use crate::ui::ParamId;
+use crate::VoiceParams;
 use nih_plug::prelude::GuiContext;
+use nih_plug_vizia::vizia::prelude::ContextProxy;
 use nih_plug_vizia::vizia::prelude::*;
 use std::sync::Arc;
-use crate::VoiceParams;
-use crate::meters::Meters;
-use crate::ui::state::{VoiceStudioData, AdvancedTab, AdvancedTabEvent};
-use crate::ui::components::{create_button, create_toggle_button, create_dropdown, create_dsp_preset_dropdown, create_macro_dial, create_slider};
-use crate::ui::advanced::{build_clean_repair_tab, build_shape_polish_tab};
-use crate::ui::ParamId;
-use nih_plug_vizia::vizia::prelude::ContextProxy;
 
 pub fn build_header<'a>(
     cx: &'a mut Context,
@@ -31,44 +34,44 @@ pub fn build_header<'a>(
         Element::new(cx).class("fill-width");
 
         Binding::new(
-                cx,
-                VoiceStudioData::params.map(|p| p.macro_mode.value()),
-                move |cx, lens| {
-                    let m = lens.get(cx);
+            cx,
+            VoiceStudioData::params.map(|p| p.macro_mode.value()),
+            move |cx, lens| {
+                let m = lens.get(cx);
 
-                    // Clone inside Binding so we do not move captured Arcs into nested move closures
-                    let params_local = params.clone();
-                    let gui_local = gui.clone();
+                // Clone inside Binding so we do not move captured Arcs into nested move closures
+                let params_local = params.clone();
+                let gui_local = gui.clone();
 
-                    HStack::new(cx, move |cx| {
-                        // Each button gets its own clones so nothing is consumed
-                        let p1 = params_local.clone();
-                        let g1 = gui_local.clone();
-                        create_toggle_button(
-                            cx,
-                            "Simple",
-                            m,
-                            "mode-button-active",
-                            "mode-button",
-                            move |_| crate::ui::state::set_macro_mode(&p1, &g1, true),
-                        );
+                HStack::new(cx, move |cx| {
+                    // Each button gets its own clones so nothing is consumed
+                    let p1 = params_local.clone();
+                    let g1 = gui_local.clone();
+                    create_toggle_button(
+                        cx,
+                        "Simple",
+                        m,
+                        "mode-button-active",
+                        "mode-button",
+                        move |_| crate::ui::state::set_macro_mode(&p1, &g1, true),
+                    );
 
-                        let p2 = params_local.clone();
-                        let g2 = gui_local.clone();
-                        create_toggle_button(
-                            cx,
-                            "Advanced",
-                            !m,
-                            "mode-button-active",
-                            "mode-button",
-                            move |_| crate::ui::state::set_macro_mode(&p2, &g2, false),
-                        );
-                    })
-                    .class("mode-group");
-                },
-            );
-        })
-        .class("header")
+                    let p2 = params_local.clone();
+                    let g2 = gui_local.clone();
+                    create_toggle_button(
+                        cx,
+                        "Advanced",
+                        !m,
+                        "mode-button-active",
+                        "mode-button",
+                        move |_| crate::ui::state::set_macro_mode(&p2, &g2, false),
+                    );
+                })
+                .class("mode-group");
+            },
+        );
+    })
+    .class("header")
 }
 
 pub fn build_footer<'a>(
@@ -88,18 +91,23 @@ pub fn build_footer<'a>(
                 let release_url = info.release_url.clone();
 
                 VStack::new(cx, move |cx| {
-                    Label::new(cx, label_text.as_str()).class("version-text").class(
-                        if status == crate::version::VersionStatus::UpdateAvailable {
-                            "version-update"
-                        } else {
-                            "version-normal"
-                        },
-                    );
+                    Label::new(cx, label_text.as_str())
+                        .class("version-text")
+                        .class(
+                            if status == crate::version::VersionStatus::UpdateAvailable {
+                                "version-update"
+                            } else {
+                                "version-normal"
+                            },
+                        );
                     Label::new(cx, detail_text.as_str()).class("version-detail");
                     if let Some(url) = release_url {
-                        Label::new(cx, &format!("→ Download {}", url.split('/').last().unwrap_or("latest")))
-                            .class("version-link")
-                            .on_press(move |_| open_url(&url));
+                        Label::new(
+                            cx,
+                            &format!("→ Download {}", url.split('/').last().unwrap_or("latest")),
+                        )
+                        .class("version-link")
+                        .on_press(move |_| open_url(&url));
                     }
                 })
                 .class("version-stack");
@@ -113,178 +121,176 @@ pub fn build_footer<'a>(
         let gui_reset = gui.clone();
 
         HStack::new(cx, move |cx| {
-            create_button(
-                cx,
-                "Help",
-                "footer-button",
-                move |_| {
-                    open_url("https://www.marczewski.me.uk/vxcleaner/help.html");
-                },
-            );
+            create_button(cx, "Help", "footer-button", move |_| {
+                open_url("https://www.marczewski.me.uk/vxcleaner/help.html");
+            });
 
-            create_button(
-                cx,
-                "Reset",
-                "footer-button",
-                move |_| {
-                    let s = nih_plug::prelude::ParamSetter::new(gui_reset.as_ref());
-                    s.begin_set_parameter(&params_reset.noise_reduction);
-                    s.set_parameter(&params_reset.noise_reduction, 0.0);
-                    s.end_set_parameter(&params_reset.noise_reduction);
+            create_button(cx, "Reset", "footer-button", move |_| {
+                let s = nih_plug::prelude::ParamSetter::new(gui_reset.as_ref());
+                s.begin_set_parameter(&params_reset.noise_reduction);
+                s.set_parameter(&params_reset.noise_reduction, 0.0);
+                s.end_set_parameter(&params_reset.noise_reduction);
 
-                    s.begin_set_parameter(&params_reset.rumble_amount);
-                    s.set_parameter(&params_reset.rumble_amount, 0.0);
-                    s.end_set_parameter(&params_reset.rumble_amount);
+                s.begin_set_parameter(&params_reset.rumble_amount);
+                s.set_parameter(&params_reset.rumble_amount, 0.0);
+                s.end_set_parameter(&params_reset.rumble_amount);
 
-                    s.begin_set_parameter(&params_reset.hiss_amount);
-                    s.set_parameter(&params_reset.hiss_amount, 0.0);
-                    s.end_set_parameter(&params_reset.hiss_amount);
+                s.begin_set_parameter(&params_reset.hiss_amount);
+                s.set_parameter(&params_reset.hiss_amount, 0.0);
+                s.end_set_parameter(&params_reset.hiss_amount);
 
-                    // Reset Static Noise Params
-                    s.begin_set_parameter(&params_reset.noise_learn_amount);
-                    s.set_parameter(&params_reset.noise_learn_amount, 0.0);
-                    s.end_set_parameter(&params_reset.noise_learn_amount);
+                // Reset Static Noise Params
+                s.begin_set_parameter(&params_reset.noise_learn_amount);
+                s.set_parameter(&params_reset.noise_learn_amount, 0.0);
+                s.end_set_parameter(&params_reset.noise_learn_amount);
 
-                    s.begin_set_parameter(&params_reset.noise_learn_trigger);
-                    s.set_parameter(&params_reset.noise_learn_trigger, false);
-                    s.end_set_parameter(&params_reset.noise_learn_trigger);
+                s.begin_set_parameter(&params_reset.noise_learn_trigger);
+                s.set_parameter(&params_reset.noise_learn_trigger, false);
+                s.end_set_parameter(&params_reset.noise_learn_trigger);
 
-                    s.begin_set_parameter(&params_reset.noise_learn_clear);
-                    s.set_parameter(&params_reset.noise_learn_clear, false);
-                    s.end_set_parameter(&params_reset.noise_learn_clear);
+                s.begin_set_parameter(&params_reset.noise_learn_clear);
+                s.set_parameter(&params_reset.noise_learn_clear, false);
+                s.end_set_parameter(&params_reset.noise_learn_clear);
 
-                    s.begin_set_parameter(&params_reset.reverb_reduction);
-                    s.set_parameter(&params_reset.reverb_reduction, 0.0);
-                    s.end_set_parameter(&params_reset.reverb_reduction);
+                s.begin_set_parameter(&params_reset.reverb_reduction);
+                s.set_parameter(&params_reset.reverb_reduction, 0.0);
+                s.end_set_parameter(&params_reset.reverb_reduction);
 
-                    s.begin_set_parameter(&params_reset.clarity);
-                    s.set_parameter(&params_reset.clarity, 0.0);
-                    s.end_set_parameter(&params_reset.clarity);
+                s.begin_set_parameter(&params_reset.clarity);
+                s.set_parameter(&params_reset.clarity, 0.0);
+                s.end_set_parameter(&params_reset.clarity);
 
-                    s.begin_set_parameter(&params_reset.proximity);
-                    s.set_parameter(&params_reset.proximity, 0.0);
-                    s.end_set_parameter(&params_reset.proximity);
+                s.begin_set_parameter(&params_reset.proximity);
+                s.set_parameter(&params_reset.proximity, 0.0);
+                s.end_set_parameter(&params_reset.proximity);
 
-                    s.begin_set_parameter(&params_reset.de_esser);
-                    s.set_parameter(&params_reset.de_esser, 0.0);
-                    s.end_set_parameter(&params_reset.de_esser);
+                s.begin_set_parameter(&params_reset.de_esser);
+                s.set_parameter(&params_reset.de_esser, 0.0);
+                s.end_set_parameter(&params_reset.de_esser);
 
-                    s.begin_set_parameter(&params_reset.leveler);
-                    s.set_parameter(&params_reset.leveler, 0.0);
-                    s.end_set_parameter(&params_reset.leveler);
+                s.begin_set_parameter(&params_reset.leveler);
+                s.set_parameter(&params_reset.leveler, 0.0);
+                s.end_set_parameter(&params_reset.leveler);
 
-                    s.begin_set_parameter(&params_reset.output_gain);
-                    s.set_parameter(&params_reset.output_gain, 0.0);
-                    s.end_set_parameter(&params_reset.output_gain);
+                s.begin_set_parameter(&params_reset.output_gain);
+                s.set_parameter(&params_reset.output_gain, 0.0);
+                s.end_set_parameter(&params_reset.output_gain);
 
-                    s.begin_set_parameter(&params_reset.breath_control);
-                    s.set_parameter(&params_reset.breath_control, 0.25);
-                    s.end_set_parameter(&params_reset.breath_control);
+                s.begin_set_parameter(&params_reset.breath_control);
+                s.set_parameter(&params_reset.breath_control, 0.25);
+                s.end_set_parameter(&params_reset.breath_control);
 
-                    s.begin_set_parameter(&params_reset.use_ml);
-                    s.set_parameter(&params_reset.use_ml, true);
-                    s.end_set_parameter(&params_reset.use_ml);
+                s.begin_set_parameter(&params_reset.use_ml);
+                s.set_parameter(&params_reset.use_ml, true);
+                s.end_set_parameter(&params_reset.use_ml);
 
-                    s.begin_set_parameter(&params_reset.macro_mode);
-                    s.set_parameter(&params_reset.macro_mode, true);
-                    s.end_set_parameter(&params_reset.macro_mode);
+                s.begin_set_parameter(&params_reset.macro_mode);
+                s.set_parameter(&params_reset.macro_mode, true);
+                s.end_set_parameter(&params_reset.macro_mode);
 
-                    s.begin_set_parameter(&params_reset.macro_clean);
-                    s.set_parameter(&params_reset.macro_clean, 0.0);
-                    s.end_set_parameter(&params_reset.macro_clean);
+                s.begin_set_parameter(&params_reset.macro_clean);
+                s.set_parameter(&params_reset.macro_clean, 0.0);
+                s.end_set_parameter(&params_reset.macro_clean);
 
-                    s.begin_set_parameter(&params_reset.macro_enhance);
-                    s.set_parameter(&params_reset.macro_enhance, 0.0);
-                    s.end_set_parameter(&params_reset.macro_enhance);
+                s.begin_set_parameter(&params_reset.macro_enhance);
+                s.set_parameter(&params_reset.macro_enhance, 0.0);
+                s.end_set_parameter(&params_reset.macro_enhance);
 
-                    s.begin_set_parameter(&params_reset.macro_control);
-                    s.set_parameter(&params_reset.macro_control, 0.0);
-                    s.end_set_parameter(&params_reset.macro_control);
+                s.begin_set_parameter(&params_reset.macro_control);
+                s.set_parameter(&params_reset.macro_control, 0.0);
+                s.end_set_parameter(&params_reset.macro_control);
 
-                    s.begin_set_parameter(&params_reset.final_output_preset);
-                    s.set_parameter(&params_reset.final_output_preset, crate::presets::OutputPreset::None);
-                    s.end_set_parameter(&params_reset.final_output_preset);
+                s.begin_set_parameter(&params_reset.final_output_preset);
+                s.set_parameter(
+                    &params_reset.final_output_preset,
+                    crate::presets::OutputPreset::None,
+                );
+                s.end_set_parameter(&params_reset.final_output_preset);
 
-                    s.begin_set_parameter(&params_reset.reset_all);
-                    s.set_parameter(&params_reset.reset_all, true);
-                    s.end_set_parameter(&params_reset.reset_all);
+                s.begin_set_parameter(&params_reset.reset_all);
+                s.set_parameter(&params_reset.reset_all, true);
+                s.end_set_parameter(&params_reset.reset_all);
 
-                    s.begin_set_parameter(&params_reset.reset_all);
-                    s.set_parameter(&params_reset.reset_all, false);
-                    s.end_set_parameter(&params_reset.reset_all);
-                },
-            );
+                s.begin_set_parameter(&params_reset.reset_all);
+                s.set_parameter(&params_reset.reset_all, false);
+                s.end_set_parameter(&params_reset.reset_all);
+            });
 
             #[cfg(feature = "debug")]
-            create_button(
-                cx,
-                "Log",
-                "footer-button",
-                move |_| {
+            create_button(cx, "Log", "footer-button", move |_| {
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = std::process::Command::new("open")
+                        .arg("-a")
+                        .arg("Console")
+                        .arg("/tmp/voice_studio.log")
+                        .spawn();
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    let _ = std::process::Command::new("xdg-open")
+                        .arg("/tmp/voice_studio.log")
+                        .spawn();
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = std::process::Command::new("notepad")
+                        .arg("C:\\temp\\voice_studio.log")
+                        .spawn();
+                }
+            });
+
+            #[cfg(feature = "debug")]
+            create_button(cx, "Edit CSS", "footer-button", move |_| {
+                // Get CSS file path in bundle folder
+                if let Ok(exe_path) = std::env::current_exe() {
                     #[cfg(target_os = "macos")]
-                    {
-                        let _ = std::process::Command::new("open")
-                            .arg("-a")
-                            .arg("Console")
-                            .arg("/tmp/voice_studio.log")
-                            .spawn();
-                    }
-                    #[cfg(target_os = "linux")]
-                    {
-                        let _ = std::process::Command::new("xdg-open")
-                            .arg("/tmp/voice_studio.log")
-                            .spawn();
-                    }
-                    #[cfg(target_os = "windows")]
-                    {
-                        let _ = std::process::Command::new("notepad")
-                            .arg("C:\\temp\\voice_studio.log")
-                            .spawn();
-                    }
-                },
-            );
-
-            #[cfg(feature = "debug")]
-            create_button(
-                cx,
-                "Edit CSS",
-                "footer-button",
-                move |_| {
-                    // Get CSS file path in bundle folder
-                    if let Ok(exe_path) = std::env::current_exe() {
-                        #[cfg(target_os = "macos")]
-                        let css_path = {
-                            if let Some(macos_dir) = exe_path.parent() {
-                                if let Some(contents_dir) = macos_dir.parent() {
-                                    if let Some(vst_bundle) = contents_dir.parent() {
-                                        Some(vst_bundle.join("ui.css"))
-                                    } else { None }
-                                } else { None }
-                            } else { None }
-                        };
-
-                        #[cfg(not(target_os = "macos"))]
-                        let css_path = exe_path.parent().map(|p| p.join("ui.css"));
-
-                        if let Some(path) = css_path {
-                            // Create file if it doesn't exist
-                            if !path.exists() {
-                                let _ = std::fs::write(&path, STYLE);
+                    let css_path = {
+                        if let Some(macos_dir) = exe_path.parent() {
+                            if let Some(contents_dir) = macos_dir.parent() {
+                                if let Some(vst_bundle) = contents_dir.parent() {
+                                    Some(vst_bundle.join("ui.css"))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
                             }
+                        } else {
+                            None
+                        }
+                    };
 
-                            // Open in system editor
-                            #[cfg(target_os = "macos")]
-                            { let _ = std::process::Command::new("open").arg("-t").arg(&path).spawn(); }
+                    #[cfg(not(target_os = "macos"))]
+                    let css_path = exe_path.parent().map(|p| p.join("ui.css"));
 
-                            #[cfg(target_os = "linux")]
-                            { let _ = std::process::Command::new("xdg-open").arg(&path).spawn(); }
+                    if let Some(path) = css_path {
+                        // Create file if it doesn't exist
+                        if !path.exists() {
+                            let _ = std::fs::write(&path, STYLE);
+                        }
 
-                            #[cfg(target_os = "windows")]
-                            { let _ = std::process::Command::new("notepad").arg(&path).spawn(); }
+                        // Open in system editor
+                        #[cfg(target_os = "macos")]
+                        {
+                            let _ = std::process::Command::new("open")
+                                .arg("-t")
+                                .arg(&path)
+                                .spawn();
+                        }
+
+                        #[cfg(target_os = "linux")]
+                        {
+                            let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+                        }
+
+                        #[cfg(target_os = "windows")]
+                        {
+                            let _ = std::process::Command::new("notepad").arg(&path).spawn();
                         }
                     }
-                },
-            );
+                }
+            });
         })
         .class("footer-buttons");
     })
@@ -341,9 +347,7 @@ pub fn build_body<'a>(
                                     "tab-header-active",
                                     "tab-header",
                                     |ex| {
-                                        ex.emit(AdvancedTabEvent::SetTab(
-                                            AdvancedTab::CleanRepair,
-                                        ))
+                                        ex.emit(AdvancedTabEvent::SetTab(AdvancedTab::CleanRepair))
                                     },
                                 );
 
@@ -354,9 +358,7 @@ pub fn build_body<'a>(
                                     "tab-header-active",
                                     "tab-header",
                                     |ex| {
-                                        ex.emit(AdvancedTabEvent::SetTab(
-                                            AdvancedTab::ShapePolish,
-                                        ))
+                                        ex.emit(AdvancedTabEvent::SetTab(AdvancedTab::ShapePolish))
                                     },
                                 );
                             })
@@ -374,7 +376,7 @@ pub fn build_body<'a>(
                                         g_tabs.clone(),
                                         m_tabs.clone(),
                                     );
-                                },
+                                }
                                 AdvancedTab::ShapePolish => {
                                     build_shape_polish_tab(cx, p_tabs.clone(), g_tabs.clone());
                                 }
@@ -392,10 +394,7 @@ pub fn build_body<'a>(
     .class("main-view")
 }
 
-pub fn build_levels<'a>(
-    cx: &'a mut Context,
-    meters: Arc<Meters>,
-) -> Handle<'a, VStack> {
+pub fn build_levels<'a>(cx: &'a mut Context, meters: Arc<Meters>) -> Handle<'a, VStack> {
     // IMPORTANT: break Arc<Meters> into independent clones so nested move closures don't "consume" it
     let meters_in = meters.clone();
     let meters_gr = meters.clone();
@@ -413,8 +412,18 @@ pub fn build_levels<'a>(
                 Label::new(cx, "IN").class("meter-label");
                 let mi2 = mi.clone();
                 HStack::new(cx, |cx| {
-                    crate::ui::meters::LevelMeter::new(cx, mi2.clone(), crate::ui::meters::MeterType::InputL).class("meter-track");
-                    crate::ui::meters::LevelMeter::new(cx, mi2.clone(), crate::ui::meters::MeterType::InputR).class("meter-track");
+                    crate::ui::meters::LevelMeter::new(
+                        cx,
+                        mi2.clone(),
+                        crate::ui::meters::MeterType::InputL,
+                    )
+                    .class("meter-track");
+                    crate::ui::meters::LevelMeter::new(
+                        cx,
+                        mi2.clone(),
+                        crate::ui::meters::MeterType::InputR,
+                    )
+                    .class("meter-track");
                 })
                 .class("meter-pair");
             })
@@ -423,9 +432,13 @@ pub fn build_levels<'a>(
             let mg = meters_gr.clone();
             VStack::new(cx, move |cx| {
                 Label::new(cx, "GR").class("meter-label");
-                crate::ui::meters::LevelMeter::new(cx, mg.clone(), crate::ui::meters::MeterType::GainReduction)
-                    .class("meter-track")
-                    .class("fill-height");
+                crate::ui::meters::LevelMeter::new(
+                    cx,
+                    mg.clone(),
+                    crate::ui::meters::MeterType::GainReduction,
+                )
+                .class("meter-track")
+                .class("fill-height");
             })
             .class("meter-col");
 
@@ -434,8 +447,18 @@ pub fn build_levels<'a>(
                 Label::new(cx, "OUT").class("meter-label");
                 let mo2 = mo.clone();
                 HStack::new(cx, |cx| {
-                    crate::ui::meters::LevelMeter::new(cx, mo2.clone(), crate::ui::meters::MeterType::OutputL).class("meter-track");
-                    crate::ui::meters::LevelMeter::new(cx, mo2.clone(), crate::ui::meters::MeterType::OutputR).class("meter-track");
+                    crate::ui::meters::LevelMeter::new(
+                        cx,
+                        mo2.clone(),
+                        crate::ui::meters::MeterType::OutputL,
+                    )
+                    .class("meter-track");
+                    crate::ui::meters::LevelMeter::new(
+                        cx,
+                        mo2.clone(),
+                        crate::ui::meters::MeterType::OutputR,
+                    )
+                    .class("meter-track");
                 })
                 .class("meter-pair");
             })
@@ -478,11 +501,11 @@ pub fn build_macro<'a>(
                     p.macro_control.value(),
                 )
             }),
-                move |cx, lens| {
-                    let (macro_mode, _, _, _) = lens.get(cx);
-                    if macro_mode {
-                        crate::ui::state::sync_advanced_from_macros(&params_sync, gui_sync.clone());
-                    }
+            move |cx, lens| {
+                let (macro_mode, _, _, _) = lens.get(cx);
+                if macro_mode {
+                    crate::ui::state::sync_advanced_from_macros(&params_sync, gui_sync.clone());
+                }
                 Element::new(cx).height(Pixels(0.0)).width(Pixels(0.0));
             },
         );
@@ -606,9 +629,15 @@ pub fn build_ui(
                     if let Some(contents_dir) = macos_dir.parent() {
                         if let Some(vst_bundle) = contents_dir.parent() {
                             Some(vst_bundle.join("ui.css"))
-                        } else { None }
-                    } else { None }
-                } else { None }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             };
 
             #[cfg(not(target_os = "macos"))]
@@ -617,7 +646,11 @@ pub fn build_ui(
             if let Some(path) = &css_path {
                 // Try to read from disk
                 if let Ok(disk_css) = std::fs::read_to_string(path) {
-                    vs_log!("✅ CSS loaded from disk: {:?} ({} bytes)", path, disk_css.len());
+                    vs_log!(
+                        "✅ CSS loaded from disk: {:?} ({} bytes)",
+                        path,
+                        disk_css.len()
+                    );
                     // Leak the string to get 'static lifetime (acceptable for stylesheets)
                     Box::leak(disk_css.into_boxed_str())
                 } else {

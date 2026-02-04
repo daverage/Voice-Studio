@@ -46,12 +46,12 @@ pub mod pink_ref_bias;
 pub mod plosive_softener;
 pub mod profile_analyzer;
 pub mod proximity;
+pub mod recovery_stage;
 pub mod spectral_guardrails;
 pub mod speech_confidence;
 pub mod speech_expander;
 pub mod speech_hpf;
 pub mod utils;
-pub mod recovery_stage;
 pub use noise_learn_remove::{NoiseLearnRemove, NoiseLearnRemoveConfig};
 
 pub use biquad::Biquad;
@@ -70,11 +70,11 @@ pub use pink_ref_bias::PinkRefBias;
 pub use plosive_softener::PlosiveSoftener;
 pub use profile_analyzer::ProfileAnalyzer;
 pub use proximity::Proximity;
+pub use recovery_stage::RecoveryStage;
 pub use spectral_guardrails::SpectralGuardrails;
 pub use speech_confidence::SpeechConfidenceEstimator;
 pub use speech_expander::SpeechExpander;
 pub use speech_hpf::SpeechHpf;
-pub use recovery_stage::RecoveryStage;
 
 /// Lifecycle state model for DSP modules.
 /// Ensures predictable behavior during training, active processing, and bypassing.
