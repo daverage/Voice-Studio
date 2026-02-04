@@ -341,6 +341,9 @@ struct VoiceStudioPlugin {
     breath_reducer_l: BreathReducer,
     breath_reducer_r: BreathReducer,
 
+    // State for noise learning toggle
+    noise_learning_active: bool,
+
     // Speech band energy protection (300Hz - 3kHz)
     speech_band_pre_l: Biquad,
     speech_band_pre_r: Biquad,
@@ -553,6 +556,8 @@ impl Default for VoiceStudioPlugin {
             breath_reducer_l: BreathReducer::new(DEFAULT_SAMPLE_RATE),
             breath_reducer_r: BreathReducer::new(DEFAULT_SAMPLE_RATE),
 
+            noise_learning_active: false,
+
             speech_band_pre_l: Biquad::new(),
             speech_band_pre_r: Biquad::new(),
             speech_band_post_l: Biquad::new(),
@@ -670,6 +675,8 @@ impl Plugin for VoiceStudioPlugin {
             self.breath_reducer_l = BreathReducer::new(self.sample_rate);
             self.breath_reducer_r = BreathReducer::new(self.sample_rate);
 
+            self.noise_learning_active = false;
+
             // Speech band: 300Hz HPF + 3kHz LPF
             self.speech_band_pre_l
                 .update_hpf(300.0, 0.5, self.sample_rate);
@@ -785,6 +792,7 @@ impl Plugin for VoiceStudioPlugin {
             self.plosive_softener_r.reset();
             self.breath_reducer_l.reset();
             self.breath_reducer_r.reset();
+            self.noise_learning_active = false;
             self.input_profile_analyzer.reset();
             self.output_profile_analyzer.reset();
             self.meters.reset();
@@ -1082,11 +1090,26 @@ impl VoiceStudioPlugin {
 
             // 0x. NOISE LEARN REMOVE (Static Noise)
             // Independent of speech, works during silence
+            // Handle toggle functionality for learn button
+            let learn_pressed = self.params.noise_learn_trigger.value();
+            let clear_pressed = self.params.noise_learn_clear.value();
+
+            // Clear button should stop learning and clear the profile
+            if clear_pressed {
+                self.noise_learning_active = false;
+            } else if learn_pressed && !self.noise_learning_active {
+                // Button was just pressed, start learning
+                self.noise_learning_active = true;
+            } else if !learn_pressed && self.noise_learning_active {
+                // Button was just released, stop learning
+                self.noise_learning_active = false;
+            }
+
             let nlr_cfg = NoiseLearnRemoveConfig {
                 enabled: self.params.noise_learn_amount.value() > 0.001,
                 amount: self.params.noise_learn_amount.value(),
-                learn: self.params.noise_learn_trigger.value(),
-                clear: self.params.noise_learn_clear.value(),
+                learn: self.noise_learning_active, // Use toggle state instead of momentary
+                clear: clear_pressed,
             };
             let (nlr_l, nlr_r) = self
                 .noise_learn_remove
