@@ -618,7 +618,7 @@ impl Plugin for VoiceStudioPlugin {
     const VENDOR: &'static str = "Andrzej Marczewski";
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
-    const VERSION: &'static str = "0.6.2";
+    const VERSION: &'static str = "0.6.3";
 
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
         main_input_channels: NonZeroU32::new(2),
