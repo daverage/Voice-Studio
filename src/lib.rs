@@ -9,8 +9,8 @@ mod version;
 use crate::dsp::{
     Biquad, BreathReducer, ChannelProcessor, ClarityDetector, DeEsserDetector, DenoiseConfig,
     EarlyReflectionSuppressor, HissRumble, LinkedCompressor, LinkedLimiter, NoiseLearnRemove,
-    NoiseLearnRemoveConfig, PinkRefBias, PlosiveSoftener, ProfileAnalyzer, RecoveryStage,
-    SpectralGuardrails, SpeechConfidenceEstimator, SpeechExpander, SpeechHpf,
+    NoiseLearnRemoveConfig, PinkRefBias, PlosiveSoftener, PostNoiseCleanup, ProfileAnalyzer,
+    RecoveryStage, SpectralGuardrails, SpeechConfidenceEstimator, SpeechExpander, SpeechHpf,
     StereoStreamingDenoiser,
 };
 use crate::macro_controller::{compute_simple_macro_targets, SimpleMacroTargets};
@@ -238,6 +238,12 @@ pub struct VoiceParams {
     #[id = "noise_learn_clear"]
     pub noise_learn_clear: BoolParam,
 
+    #[id = "post_noise_hf_bias"]
+    pub post_noise_hf_bias: BoolParam,
+
+    #[id = "hidden_tone_fx_bypass"]
+    pub hidden_tone_fx_bypass: BoolParam,
+
     #[id = "reverb_reduction"]
     pub reverb_reduction: FloatParam,
 
@@ -335,6 +341,8 @@ struct VoiceStudioPlugin {
     hiss_rumble: HissRumble,
     noise_learn_remove: NoiseLearnRemove,
     recovery_stage: RecoveryStage,
+    post_noise_cleanup_l: PostNoiseCleanup,
+    post_noise_cleanup_r: PostNoiseCleanup,
 
     // Hidden hygiene and automatic protection
     speech_hpf: SpeechHpf,
@@ -434,9 +442,14 @@ impl Default for VoiceStudioPlugin {
                 .with_smoother(SmoothingStyle::Linear(100.0))
                 .with_value_to_string(Arc::new(format_percent)),
 
-                noise_learn_trigger: BoolParam::new("Learn Noise", false).non_automatable(),
+                noise_learn_trigger: BoolParam::new("Re-learn Noise", false).non_automatable(),
 
                 noise_learn_clear: BoolParam::new("Clear Noise", false).non_automatable(),
+
+                post_noise_hf_bias: BoolParam::new("Post Noise HF Bias", true).non_automatable(),
+
+                hidden_tone_fx_bypass: BoolParam::new("Bypass Hidden Tone FX", false)
+                    .non_automatable(),
 
                 reverb_reduction: FloatParam::new(
                     "De-Verb (Room)",
@@ -548,6 +561,8 @@ impl Default for VoiceStudioPlugin {
             hiss_rumble: HissRumble::new(DEFAULT_SAMPLE_RATE),
             noise_learn_remove: NoiseLearnRemove::new(2048, 512, DEFAULT_SAMPLE_RATE),
             recovery_stage: RecoveryStage::new(DEFAULT_SAMPLE_RATE),
+            post_noise_cleanup_l: PostNoiseCleanup::new(DEFAULT_SAMPLE_RATE),
+            post_noise_cleanup_r: PostNoiseCleanup::new(DEFAULT_SAMPLE_RATE),
 
             speech_hpf: SpeechHpf::new(DEFAULT_SAMPLE_RATE),
             plosive_softener_l: PlosiveSoftener::new(DEFAULT_SAMPLE_RATE),
@@ -613,7 +628,7 @@ impl Plugin for VoiceStudioPlugin {
     const VENDOR: &'static str = "Andrzej Marczewski";
     const URL: &'static str = "";
     const EMAIL: &'static str = "";
-    const VERSION: &'static str = "0.6.2";
+    const VERSION: &'static str = "0.6.4";
 
     const AUDIO_IO_LAYOUTS: &'static [AudioIOLayout] = &[AudioIOLayout {
         main_input_channels: NonZeroU32::new(2),
@@ -667,6 +682,8 @@ impl Plugin for VoiceStudioPlugin {
             self.hiss_rumble = HissRumble::new(self.sample_rate);
             self.noise_learn_remove = NoiseLearnRemove::new(2048, 512, self.sample_rate);
             self.recovery_stage = RecoveryStage::new(self.sample_rate);
+            self.post_noise_cleanup_l = PostNoiseCleanup::new(self.sample_rate);
+            self.post_noise_cleanup_r = PostNoiseCleanup::new(self.sample_rate);
 
             self.speech_hpf = SpeechHpf::new(self.sample_rate);
             self.plosive_softener_l = PlosiveSoftener::new(self.sample_rate);
@@ -784,6 +801,8 @@ impl Plugin for VoiceStudioPlugin {
             self.hiss_rumble.reset();
             self.noise_learn_remove.reset();
             self.recovery_stage.reset();
+            self.post_noise_cleanup_l.reset();
+            self.post_noise_cleanup_r.reset();
             self.speech_hpf.reset();
             self.plosive_softener_l.reset();
             self.plosive_softener_r.reset();
@@ -1019,6 +1038,7 @@ impl VoiceStudioPlugin {
             self.process_l.bypass_restoration || self.process_r.bypass_restoration;
         let bypass_shaping = self.process_l.bypass_shaping || self.process_r.bypass_shaping;
         let bypass_dynamics = self.process_l.bypass_dynamics || self.process_r.bypass_dynamics;
+        let bypass_hidden_tone = self.params.hidden_tone_fx_bypass.value();
 
         // Proximity contributes to deverb (closer = more deverb = less room sound)
         use crate::dsp::Proximity;
@@ -1150,7 +1170,7 @@ impl VoiceStudioPlugin {
             // 3. PINK REFERENCE BIAS (Hidden Spectral Tonal Conditioning)
             // Gently nudges speech towards -3dB/oct tilt to improve stability.
             // Gated by speech confidence, bypassed if restoration disabled.
-            let (bias_l, bias_r) = if bypass_restoration {
+            let (bias_l, bias_r) = if bypass_restoration || bypass_hidden_tone {
                 (exp_l, exp_r)
             } else {
                 self.pink_ref_bias.process(
@@ -1374,16 +1394,52 @@ impl VoiceStudioPlugin {
                 expander_gr_db,
             );
 
-            let (rec_l, rec_r) =
+            let (rec_l, rec_r) = if bypass_hidden_tone {
+                (s7_l, s7_r)
+            } else {
                 self.recovery_stage
-                    .process(s7_l, s7_r, sidechain.speech_conf, integrity_score);
+                    .process(s7_l, s7_r, sidechain.speech_conf, integrity_score)
+            };
+
+            // Post-noise cleanup (second-pass, very light)
+            let post_cleanup_amt = (noise_amt * 0.35).clamp(0.0, 1.0);
+            let env_rms = env_l.rms.max(env_r.rms);
+            let env_noise_floor = env_l.noise_floor.max(env_r.noise_floor);
+            let use_hf_bias = self.params.post_noise_hf_bias.value();
+            let (post_l, post_r) = if bypass_dynamics || bypass_hidden_tone {
+                (rec_l, rec_r)
+            } else {
+                (
+                    self.post_noise_cleanup_l.process_sample(
+                        rec_l,
+                        sidechain.speech_conf,
+                        env_rms,
+                        env_noise_floor,
+                        post_cleanup_amt,
+                        use_hf_bias,
+                        true,
+                    ),
+                    self.post_noise_cleanup_r.process_sample(
+                        rec_r,
+                        sidechain.speech_conf,
+                        env_rms,
+                        env_noise_floor,
+                        post_cleanup_amt,
+                        use_hf_bias,
+                        false,
+                    ),
+                )
+            };
 
             // E. SPECTRAL GUARDRAILS (safety layer before limiter)
             // Prevents extreme settings from breaking sound
             // Note: Applied after leveler to ensure gain reduction doesn't exceed limiter threshold
-            let (s7g_l, s7g_r) =
+            let (s7g_l, s7g_r) = if bypass_hidden_tone {
+                (post_l, post_r)
+            } else {
                 self.spectral_guardrails
-                    .process(rec_l, rec_r, true, sidechain.speech_conf);
+                    .process(post_l, post_r, true, sidechain.speech_conf)
+            };
 
             let (s8_l, s8_r) = if bypass_dynamics {
                 (s7g_l, s7g_r)
