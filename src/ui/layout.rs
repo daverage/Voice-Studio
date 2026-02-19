@@ -152,6 +152,18 @@ pub fn build_footer<'a>(
                 s.set_parameter(&params_reset.noise_learn_clear, false);
                 s.end_set_parameter(&params_reset.noise_learn_clear);
 
+                s.begin_set_parameter(&params_reset.post_noise_hf_bias);
+                s.set_parameter(&params_reset.post_noise_hf_bias, true);
+                s.end_set_parameter(&params_reset.post_noise_hf_bias);
+
+                s.begin_set_parameter(&params_reset.hidden_tone_fx_bypass);
+                s.set_parameter(&params_reset.hidden_tone_fx_bypass, false);
+                s.end_set_parameter(&params_reset.hidden_tone_fx_bypass);
+
+                s.begin_set_parameter(&params_reset.low_end_protect);
+                s.set_parameter(&params_reset.low_end_protect, true);
+                s.end_set_parameter(&params_reset.low_end_protect);
+
                 s.begin_set_parameter(&params_reset.reverb_reduction);
                 s.set_parameter(&params_reset.reverb_reduction, 0.0);
                 s.end_set_parameter(&params_reset.reverb_reduction);

@@ -1,0 +1,98 @@
+# Voice Studio (VxCleaner) Core DSP Reference
+# This file contains the primary Rust-based algorithms for dynamics and shaping.
+
+// =============================================================================
+// 1. PLOSIVE SOFTENER (src/dsp/plosive_softener.rs)
+// =============================================================================
+// Automatically detects and attenuates low-frequency bursts (P/B sounds)
+// using a fast-acting dynamic low-shelf.
+
+Constants:
+- Filter: Low-Shelf @ 150.0 Hz (Q: 0.707)
+- Attack: 1.0 ms
+- Release: 50.0 ms
+- Threshold: 0.08 linear (~ -22dB)
+- Max Reduction: 8.0 dB
+
+Logic:
+- Uses a fast envelope on the full signal.
+- Calculates 'over' threshold: (low_env - THRESHOLD).max(0.0).
+- Maps 'over' to target reduction: (over * 20.0).min(MAX_SOFTEN_DB).
+- Updates filter coefficients only if change > 0.1dB to save CPU.
+
+
+// =============================================================================
+// 2. CLARITY / DE-MUD (src/dsp/clarity.rs)
+// =============================================================================
+// Reduces low-mid congestion (120–380 Hz) during voiced speech.
+
+Constants (Detector):
+- HPF: 120.0 Hz / LPF: 380.0 Hz (Focus on vocal body)
+- RMS Attack: 30.0 ms / Release: 250.0 ms
+- ZCR (Zero Crossing Rate) used to identify voiced speech (vowels).
+
+Constants (Shaper):
+- Filter: Low-Shelf @ 250.0 Hz (Q: 0.7)
+- Max Cut: 48.0 dB (Guarded)
+- Smoothing: 0.02 coefficient interpolation
+
+Logic:
+- Analyzes "Body Energy" = (RMS * voiced_confidence).
+- Applies an "aggressive tail" curve to the user slider to preserve natural feel.
+- Only cuts when 'drive' (body energy) is detected, carving out "mud" in real-time.
+
+
+// =============================================================================
+// 3. DE-ESSER (src/dsp/de_esser.rs)
+// =============================================================================
+// Reduces harsh sibilance (S/SH/CH) using dual-band detection.
+
+Constants (Detector):
+- Sibilance Band: 4.5 kHz to 10.0 kHz
+- Attack: 0.4 ms / Release: 60.0 ms
+- Level Threshold Scale: 0.12 (Relative to overall signal RMS)
+
+Constants (Band):
+- Filter: Peaking @ 7000.0 Hz (Q: 1.0)
+- Max Reduction: 24.0 dB
+
+Logic:
+- Calculates "Focus Weight" by comparing high-frequency energy to lower bands.
+- Uses Zero-Crossing Rate to confirm sibilance (high ZCR = unvoiced).
+- Applies targeted peaking cut only when sibilance is confirmed, avoiding dullness on singing.
+
+
+// =============================================================================
+// 4. COMPRESSOR / LEVELER (src/dsp/compressor.rs)
+// =============================================================================
+// Stereo-linked RMS+Peak hybrid designed for vocal consistency.
+
+Constants:
+- Target Level: -24.0 dB
+- Ratio: Adaptive (1.6:1 for low, up to 3.2:1 for high signals)
+- Attack: 40.0 ms
+- Release: Program Dependent (400ms Fast to 900ms Slow)
+- Peak Tamer: Separate stage with 5ms attack / 120ms release.
+
+Logic:
+- Hybrid Detector: (0.75 * RMS) + (0.25 * Peak).
+- Silence Release: If speech confidence < 0.25, gain smoothly releases to 1.0.
+- Release Hold: Prevents pumping by holding gain for 80ms after an attack event.
+- Automatic Makeup: Gated by speech, caps at +4dB boost.
+
+
+// =============================================================================
+// 5. LIMITER (src/dsp/limiter.rs)
+// =============================================================================
+// True-peak safety limiter for final output protection.
+
+Constants:
+- Ceiling: 0.98 (~ -0.18 dBTP)
+- Knee: 1.0 dB soft-knee
+- Peak Attack: 0.1 ms (True Peak catch)
+- Gain Release: 400.0 ms (Transparent recovery)
+
+Logic:
+- Completely inert unless the signal exceeds -0.18 dBTP.
+- Uses a fast attack to clamp peaks instantly and a slow release to remain transparent.
+- Stereo-linked to prevent image shifting during limiting.

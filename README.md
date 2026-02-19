@@ -18,8 +18,9 @@ The pipeline prioritizes safety, transparency, and low latency. Every stage runs
 7. **Breath Management** – confidence-weighted breath reduction keeps inhales but tames exhale noise.
 8. **Deverber / Shaping** – late reverb energy is peeled back and shaping components restore body/air.
 9. **Proximity & Clarity Shaping** – separate low-end warmth and high-frequency articulation controls.
-10. **Dynamics Chain** – De-esser, Leveler (linked stereo compressor), and Limiter protect the downstream buss.
-11. **Output Gain + Delivery Guardrails** – final level trimming with optional delivery presets (YouTube, Spotify, Broadcast).
+10. **Post-Noise Cleanup** – very light, confidence-gated attenuation to tuck residual noise after shaping.
+11. **Dynamics Chain** – De-esser, Leveler (linked stereo compressor), and Limiter protect the downstream buss.
+12. **Output Gain + Delivery Guardrails** – final level trimming with optional delivery presets (YouTube, Spotify, Broadcast).
 
 ## Modes
 - **Simple Mode macros** (Clean, Enhance, Control) map a handful of intent-driven buttons to precise adjustments across the entire DSP stack, letting you jump into a mix without hunting sliders.
@@ -31,7 +32,10 @@ The plugin also exposes a dedicated **Quality meter** beneath the noise controls
 ### Clean & Repair
 * **Rumble** – HPF-based control for 20–120 Hz energy.
 * **Hiss** – HF attenuation above ~8 kHz without dulling clarity.
-* **Static Noise** – learn and clear constant room tone via the Learn/Clear buttons.
+* **Static Noise** – learn and clear constant room tone via the Re-learn/Clear buttons.
+* **HF Bias** – toggles HF-focused cleanup in the post-noise pass.
+* **Hidden FX** – toggles hidden tone stages (pink bias, recovery, post-cleanup, guardrails). On by default.
+* **Low End** – toggles denoiser low-end protection (disable if it boosts bass at high reduction).
 * **Noise Reduction** – adaptive spectral gating blends aggressively with smoothing.
 * **De-Verb** – early reflection suppression.
 * **Breath Control** – confidence-weighted breath softening between words.

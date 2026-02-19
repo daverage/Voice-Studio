@@ -232,14 +232,27 @@ impl SpectralGuardrails {
         // Calculate target corrections based on ratios
         let (target_low_cut, target_high_cut) = self.calculate_corrections(speech_confidence);
 
+        // Adaptive smoothing: Fast Attack (to protect), Slow Release (to prevent pumping/oscillation)
+        // If target > current (more cut needed), use fast attack.
+        // If target < current (release cut), use slow release.
+        let attack_coeff = time_constant_coeff(20.0, self.sample_rate); // 20ms attack
+        let release_coeff = time_constant_coeff(400.0, self.sample_rate); // 400ms release (slower)
+
+        let low_coeff = if target_low_cut > self.low_mid_cut_db { attack_coeff } else { release_coeff };
+        let high_coeff = if target_high_cut > self.high_cut_db { attack_coeff } else { release_coeff };
+
         // Smooth corrections
-        self.low_mid_cut_db = self.correction_coeff * self.low_mid_cut_db
-            + (1.0 - self.correction_coeff) * target_low_cut;
-        self.high_cut_db = self.correction_coeff * self.high_cut_db
-            + (1.0 - self.correction_coeff) * target_high_cut;
+        self.low_mid_cut_db = low_coeff * self.low_mid_cut_db
+            + (1.0 - low_coeff) * target_low_cut;
+        self.high_cut_db = high_coeff * self.high_cut_db
+            + (1.0 - high_coeff) * target_high_cut;
+
+        // Safety clamp to prevent instability
+        self.low_mid_cut_db = self.low_mid_cut_db.clamp(0.0, 12.0);
+        self.high_cut_db = self.high_cut_db.clamp(0.0, 12.0);
 
         // Update correction filters if needed
-        if self.low_mid_cut_db.abs() > 0.1 {
+        if self.low_mid_cut_db.abs() > 0.01 {
             self.low_shelf_l.update_low_shelf(
                 LOW_MID_BAND_HIGH,
                 0.707,

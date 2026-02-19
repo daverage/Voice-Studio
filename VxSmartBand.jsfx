@@ -1,0 +1,246 @@
+desc:VxSmartBand (The Complete Solution - Hidden DSP + Enhancer)
+// Single-plugin implementation of the VxCleaner hidden DSP chain + frequency restoration.
+// Architecture based on AUDIO_DSP_PATH.md
+
+slider1:100<0,100,1>Intensity (%)
+slider2:0<-12,12,0.1>Output Gain (dB)
+slider3:50<0,100,1>Bass Restore (%)
+slider4:50<0,100,1>Mid Clarity (%)
+slider5:50<0,100,1>Air Polish (%)
+slider6:0<0,1,1{Vocal,Music}>Mode
+
+@init
+sr = srate;
+pi = $pi;
+eps = 0.000000001;
+
+// --- BIQUAD FUNCTIONS (Corrected for JSFX) ---
+function biquad_hpf(f0, q) (
+  w0=2*$pi*f0/sr; alpha=sin(w0)/(2*q); c=cos(w0);
+  b0=(1+c)/2; b1=-(1+c); b2=(1+c)/2; a0=1+alpha; a1=-2*c; a2=1-alpha;
+  this.b0=b0/a0; this.b1=b1/a0; this.b2=b2/a0; this.a1=a1/a0; this.a2=a2/a0;
+);
+function biquad_lpf(f0, q) (
+  w0=2*$pi*f0/sr; alpha=sin(w0)/(2*q); c=cos(w0);
+  b0=(1-c)/2; b1=1-c; b2=(1-c)/2; a0=1+alpha; a1=-2*c; a2=1-alpha;
+  this.b0=b0/a0; this.b1=b1/a0; this.b2=b2/a0; this.a1=a1/a0; this.a2=a2/a0;
+);
+function biquad_peaking(f0, q, g_db) (
+  A=pow(10, g_db/40); w0=2*$pi*f0/sr; alpha=sin(w0)/(2*q); c=cos(w0);
+  b0=1+alpha*A; b1=-2*c; b2=1-alpha*A; a0=1+alpha/A; a1=-2*c; a2=1-alpha/A;
+  this.b0=b0/a0; this.b1=b1/a0; this.b2=b2/a0; this.a1=a1/a0; this.a2=a2/a0;
+);
+function biquad_lowshelf(f0, q, g_db) (
+  A=pow(10, g_db/40); w0=2*$pi*f0/sr; alpha=sin(w0)/(2*q); c=cos(w0);
+  ap1=A+1; am1=A-1; sA=2*sqrt(A)*alpha;
+  b0=A*(ap1-am1*c+sA); b1=2*A*(am1-ap1*c); b2=A*(ap1-am1*c-sA);
+  a0=ap1+am1*c+sA; a1=-2*(am1+ap1*c); a2=ap1+am1*c-sA;
+  this.b0=b0/a0; this.b1=b1/a0; this.b2=b2/a0; this.a1=a1/a0; this.a2=a2/a0;
+);
+function biquad_highshelf(f0, q, g_db) (
+  A=pow(10, g_db/40); w0=2*$pi*f0/sr; alpha=sin(w0)/(2*q); c=cos(w0);
+  ap1=A+1; am1=A-1; sA=2*sqrt(A)*alpha;
+  b0=A*(ap1+am1*c+sA); b1=-2*A*(am1+ap1*c); b2=A*(ap1+am1*c-sA);
+  a0=ap1-am1*c+sA; a1=2*(am1-ap1*c); a2=ap1-am1*c-sA;
+  this.b0=b0/a0; this.b1=b1/a0; this.b2=b2/a0; this.a1=a1/a0; this.a2=a2/a0;
+);
+function proc(x) (
+  y=this.b0*x + this.b1*this.x1 + this.b2*this.x2 - this.a1*this.y1 - this.a2*this.y2;
+  this.x2=this.x1; this.x1=x; this.y2=this.y1; this.y1=y; y;
+);
+
+function clamp(v, lo, hi) ( v < lo ? lo : (v > hi ? hi : v); );
+
+// --- INIT FILTERS ---
+
+// Always-on HPFs
+hpf90_l.biquad_hpf(90, 0.707); hpf90_r.biquad_hpf(90, 0.707);
+rumble_l.biquad_hpf(20, 0.707); rumble_r.biquad_hpf(20, 0.707);
+safety_l.biquad_hpf(80, 0.707); safety_r.biquad_hpf(80, 0.707);
+
+// Pink Bias
+pink_lo_l.biquad_lowshelf(250, 0.707, 0); pink_lo_r.biquad_lowshelf(250, 0.707, 0);
+pink_hi_l.biquad_highshelf(4000, 0.707, 0); pink_hi_r.biquad_highshelf(4000, 0.707, 0);
+
+// Plosive Softener
+plosive_l.biquad_lowshelf(150, 0.707, 0); plosive_r.biquad_lowshelf(150, 0.707, 0);
+
+// Recovery Stage
+rec_presence_l.biquad_highshelf(2500, 0.707, 0); rec_presence_r.biquad_highshelf(2500, 0.707, 0);
+rec_air_l.biquad_highshelf(10000, 0.707, 0); rec_air_r.biquad_highshelf(10000, 0.707, 0);
+
+// User Shaping
+bass_restore_l.biquad_lowshelf(180, 0.707, 0); bass_restore_r.biquad_lowshelf(180, 0.707, 0);
+mid_clarity_l.biquad_peaking(250, 0.7, 0); mid_clarity_r.biquad_peaking(250, 0.7, 0);
+air_polish_l.biquad_highshelf(10000, 0.707, 0); air_polish_r.biquad_highshelf(10000, 0.707, 0);
+
+// Analysis filters
+speech_hp_l.biquad_hpf(250, 0.707); speech_hp_r.biquad_hpf(250, 0.707);
+speech_lp_l.biquad_lpf(4000, 0.707); speech_lp_r.biquad_lpf(4000, 0.707);
+lowmid_hp_l.biquad_hpf(150, 0.707); lowmid_hp_r.biquad_hpf(150, 0.707);
+lowmid_lp_l.biquad_lpf(6000, 0.707); lowmid_lp_r.biquad_lpf(6000, 0.707);
+hi_hp_l.biquad_hpf(4000, 0.707); hi_hp_r.biquad_hpf(4000, 0.707);
+hi_lp_l.biquad_lpf(12000, 0.707); hi_lp_r.biquad_lpf(12000, 0.707);
+
+// Ballistics
+sc_atk = 1 - exp(-1 / (sr * 0.015));
+sc_rel = 1 - exp(-1 / (sr * 0.120));
+pink_smooth = 1 - exp(-1 / (sr * 2.0));
+pl_atk = 1 - exp(-1 / (sr * 0.001));
+pl_rel = 1 - exp(-1 / (sr * 0.050));
+rec_atk = 1 - exp(-1 / (sr * 0.150));
+rec_rel = 1 - exp(-1 / (sr * 0.060));
+lcomp_alpha = 1 - exp(-1 / (sr * 10.0));
+
+@sample
+intensity = slider1 / 100;
+out_gain = pow(10, slider2/20);
+bass_amt = slider3 / 100;
+mid_amt = slider4 / 100;
+air_amt = slider5 / 100;
+mode = slider6;
+
+inL = spl0; inR = spl1;
+
+// --- STEP 0: SPEECH CONFIDENCE ANALYSIS ---
+spL = speech_lp_l.proc(speech_hp_l.proc(inL));
+spR = speech_lp_r.proc(speech_hp_r.proc(inR));
+sp_pow = 0.5 * (spL*spL + spR*spR);
+full_pow = 0.5 * (inL*inL + inR*inR);
+ratio = sp_pow / (full_pow + eps);
+raw_sc = clamp((ratio - 0.15) * 4.0, 0, 1);
+raw_sc > sc_env ? sc_env += (raw_sc - sc_env) * sc_atk : sc_env += (raw_sc - sc_env) * sc_rel;
+
+// Effective gating: 1.0 for Music, sc_env for Vocal
+g_env = mode ? 1.0 : sc_env;
+
+// --- BYPASS CHECK ---
+intensity <= 0.0005 ? (
+  spl0 = inL * out_gain;
+  spl1 = inR * out_gain;
+) : (
+
+// --- STEP 1: ALWAYS-ON HPFs ---
+// scaled by intensity to allow smooth bypass
+hpf_target = mode ? 35 : 90;
+safety_target = mode ? 30 : 80;
+h90 = 5 + intensity * (hpf_target - 5);
+r20 = 5 + intensity * (20 - 5);
+s80 = 5 + intensity * (safety_target - 5);
+hpf90_l.biquad_hpf(h90, 0.707); hpf90_r.biquad_hpf(h90, 0.707);
+rumble_l.biquad_hpf(r20, 0.707); rumble_r.biquad_hpf(r20, 0.707);
+safety_l.biquad_hpf(s80, 0.707); safety_r.biquad_hpf(s80, 0.707);
+
+stageL = safety_l.proc(rumble_l.proc(hpf90_l.proc(inL)));
+stageR = safety_r.proc(rumble_r.proc(hpf90_r.proc(inR)));
+
+// --- STEP 2: PINK BIAS (Gated) ---
+lowL = lowmid_lp_l.proc(lowmid_hp_l.proc(stageL));
+lowR = lowmid_lp_r.proc(lowmid_hp_r.proc(stageR));
+hiL = hi_lp_l.proc(hi_hp_l.proc(stageL));
+hiR = hi_lp_r.proc(hi_hp_r.proc(stageR));
+rms_low = 0.999 * rms_low + 0.001 * (0.5 * (lowL*lowL + lowR*lowR));
+rms_hi = 0.999 * rms_hi + 0.001 * (0.5 * (hiL*hiL + hiR*hiR));
+err = log(rms_low + eps) - log(rms_hi + eps);
+pink_db = clamp(err * 0.8, -2.0, 2.0) * g_env * intensity;
+pink_smoothed += (pink_db - pink_smoothed) * pink_smooth;
+abs(pink_smoothed - pink_cur) > 0.05 ? (
+  pink_cur = pink_smoothed;
+  pink_lo_l.biquad_lowshelf(250, 0.707, 0.9 * pink_cur);
+  pink_lo_r.biquad_lowshelf(250, 0.707, 0.9 * pink_cur);
+  pink_hi_l.biquad_highshelf(4000, 0.707, 1.0 * pink_cur);
+  pink_hi_r.biquad_highshelf(4000, 0.707, 1.0 * pink_cur);
+);
+stageL = pink_hi_l.proc(pink_lo_l.proc(stageL));
+stageR = pink_hi_r.proc(pink_lo_r.proc(stageR));
+
+// --- STEP 3: PLOSIVE SOFTENER (Dynamic) ---
+p_env = 0.5 * (abs(stageL) + abs(stageR));
+p_env > pl_env ? pl_env += (p_env - pl_env) * pl_atk : pl_env += (p_env - pl_env) * pl_rel;
+p_target = min(8, max(0, pl_env - 0.08) * 20) * intensity;
+// Plosives less aggressive in music mode
+mode ? p_target *= 0.5;
+abs(p_target - pl_cur) > 0.1 ? (
+  pl_cur = p_target;
+  plosive_l.biquad_lowshelf(150, 0.707, -pl_cur);
+  plosive_r.biquad_lowshelf(150, 0.707, -pl_cur);
+);
+stageL = plosive_l.proc(stageL);
+stageR = plosive_r.proc(stageR);
+
+// --- STEP 4: RECOVERY STAGE (Gated) ---
+// Fixed offsets + gated boost
+rec_p = (1.5 + 1.0 * g_env) * intensity;
+rec_a = (2.0 + 2.0 * g_env) * intensity;
+abs(rec_p - rec_p_cur) > 0.05 ? (
+  rec_p_cur = rec_p;
+  rec_presence_l.biquad_highshelf(2500, 0.707, rec_p_cur);
+  rec_presence_r.biquad_highshelf(2500, 0.707, rec_p_cur);
+);
+abs(rec_a - rec_a_cur) > 0.05 ? (
+  rec_a_cur = rec_a;
+  rec_air_l.biquad_highshelf(10000, 0.707, rec_a_cur);
+  rec_air_r.biquad_highshelf(10000, 0.707, rec_a_cur);
+);
+stageL = rec_air_l.proc(rec_presence_l.proc(stageL));
+stageR = rec_air_r.proc(rec_presence_r.proc(stageR));
+
+// --- STEP 4.5: LOUDNESS COMPENSATION (Hidden stages only) ---
+in_pow = lcomp_alpha * in_pow + (1-lcomp_alpha) * (0.5*(inL*inL + inR*inR));
+out_pow = lcomp_alpha * out_pow + (1-lcomp_alpha) * (0.5*(stageL*stageL + stageR*stageR));
+l_target = (in_pow > eps && out_pow > eps) ? clamp(sqrt(in_pow / out_pow), 0.95, 1.05) : 1;
+l_gain += (l_target - l_gain) * 0.001;
+l_mix = 1 - intensity + intensity * l_gain;
+stageL *= l_mix; stageR *= l_mix;
+
+// --- STEP 5: USER SHAPING (Frequency Restoration) ---
+
+// Bass Restore (180Hz LS boost)
+b_db = 8.0 * bass_amt * intensity;
+abs(b_db - b_cur) > 0.05 ? (
+  b_cur = b_db;
+  bass_restore_l.biquad_lowshelf(180, 0.707, b_cur);
+  bass_restore_r.biquad_lowshelf(180, 0.707, b_cur);
+);
+stageL = bass_restore_l.proc(stageL);
+stageR = bass_restore_r.proc(stageR);
+
+// Mid Clarity (250Hz Dynamic Peaking Cut)
+// Based on mid-band energy to remove "boxiness"
+m_env = 0.95 * m_env + 0.05 * 0.5 * (abs(stageL) + abs(stageR));
+m_db = -18.0 * m_env * 8.0 * mid_amt * intensity;
+m_db = max(-18, m_db);
+abs(m_db - m_cur) > 0.1 ? (
+  m_cur = m_db;
+  mid_clarity_l.biquad_peaking(250, 1.2, m_cur);
+  mid_clarity_r.biquad_peaking(250, 1.2, m_cur);
+);
+stageL = mid_clarity_l.proc(stageL);
+stageR = mid_clarity_r.proc(stageR);
+
+// Air Polish (10kHz HS boost)
+a_db = 8.0 * air_amt * intensity;
+abs(a_db - a_cur) > 0.05 ? (
+  a_cur = a_db;
+  air_polish_l.biquad_highshelf(10000, 0.707, a_cur);
+  air_polish_r.biquad_highshelf(10000, 0.707, a_cur);
+);
+stageL = air_polish_l.proc(stageL);
+stageR = air_polish_r.proc(stageR);
+
+// --- STEP 7: OUTPUT GAIN & SAFETY ---
+spl0 = stageL * out_gain;
+spl1 = stageR * out_gain;
+
+pk = max(abs(spl0), abs(spl1));
+pk > 0.99 ? (
+  scale = 0.99 / pk;
+  spl0 *= scale; spl1 *= scale;
+);
+
+abs_pk = max(abs(spl0), abs(spl1));
+abs_pk > 4 ? (
+  scale = 4 / abs_pk;
+  spl0 *= scale; spl1 *= scale;
+);
+); // end bypass else

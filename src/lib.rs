@@ -244,6 +244,9 @@ pub struct VoiceParams {
     #[id = "hidden_tone_fx_bypass"]
     pub hidden_tone_fx_bypass: BoolParam,
 
+    #[id = "low_end_protect"]
+    pub low_end_protect: BoolParam,
+
     #[id = "reverb_reduction"]
     pub reverb_reduction: FloatParam,
 
@@ -450,6 +453,8 @@ impl Default for VoiceStudioPlugin {
 
                 hidden_tone_fx_bypass: BoolParam::new("Bypass Hidden Tone FX", false)
                     .non_automatable(),
+
+                low_end_protect: BoolParam::new("Low-End Protect", true).non_automatable(),
 
                 reverb_reduction: FloatParam::new(
                     "De-Verb (Room)",
@@ -1054,6 +1059,7 @@ impl VoiceStudioPlugin {
             tone: 0.5, // Neutral, cleanup handled by HissRumble
             sample_rate: self.sample_rate,
             speech_confidence: 0.5, // Will be updated per-sample with actual sidechain value
+            low_end_protect: self.params.low_end_protect.value(),
         };
 
         // Peak decay rate: 13 dB/sec (typical for DAW meters)

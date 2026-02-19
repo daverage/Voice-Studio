@@ -251,6 +251,7 @@ pub struct DenoiseConfig {
     pub tone: f32,
     pub sample_rate: f32,
     pub speech_confidence: f32, // Speech confidence for adaptive behavior
+    pub low_end_protect: bool,
 }
 
 /// DSP-based denoiser implementation
@@ -655,15 +656,18 @@ impl DspDenoiserDetector {
 
         // 7b) Low-Frequency Harmonic Protection (≤450Hz)
         // Prevent excessive attenuation on low-frequency voiced bins
-        if voiced && effective_amt > 0.0 {
+        let speech_conf = cfg.speech_confidence.clamp(0.0, 1.0);
+        if cfg.low_end_protect && voiced && effective_amt > 0.0 && speech_conf > 0.35 {
             let bin_width = sr / n as f32;
             let lf_cutoff_hz = 450.0;
             let lf_cutoff_bin = (lf_cutoff_hz / bin_width) as usize;
+            let min_gain_base = lerp(0.08, 0.22, speech_conf);
+            let min_gain = lerp(min_gain_base, min_gain_base * 0.6, effective_amt);
 
             for i in 0..=lf_cutoff_bin.min(nyq) {
-                // Maximum 70% attenuation (minimum gain 0.3)
-                if self.gain_buf[i] < 0.3 {
-                    self.gain_buf[i] = 0.3;
+                // Protect voiced lows, but relax protection when speech confidence is low.
+                if self.gain_buf[i] < min_gain {
+                    self.gain_buf[i] = min_gain;
                 }
             }
         }

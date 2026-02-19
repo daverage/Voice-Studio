@@ -1,5 +1,40 @@
 # Tasks – Phase 3 Feature Implementation & Documentation Cleanup
 
+- [x] Make Re-learn work during playback (arm until silence)
+  - [x] Latch relearn and start window on first low-confidence segment
+  - [x] Disable auto-learn (only relearn window learns) to prevent pulsing noise
+- [x] Add low-end protection toggle + clarify Hidden FX impact
+  - [x] Add param + UI toggle
+  - [x] Wire toggle into denoiser low-end protection
+  - [x] Update reset defaults and docs
+- [x] Fix low-end bump at max noise reduction + improve static noise learn sensitivity
+  - [x] Relax low-frequency protection when speech confidence is low
+  - [x] Increase learn gate threshold slightly for static noise
+- [x] Move HF/Hidden FX toggles to right column + keep quality meter active when Static Noise enabled
+  - [x] Reposition toggles in UI layout
+  - [x] Adjust quality meter behavior
+- [x] Set Hidden FX bypass to default on
+- [x] Add toggles for HF bias and hidden tone FX bypass
+  - [x] Add params + UI toggles
+  - [x] Wire HF bias toggle into post-noise cleanup
+  - [x] Implement hidden tone FX bypass in signal chain
+  - [x] Update docs
+- [x] Add second-pass noise cleanup (confidence-gated attenuation + fallback)
+  - [x] Implement post-noise cleanup DSP module
+  - [x] Wire module into signal chain after shaping/recovery
+  - [x] Update docs to reflect two-pass denoise flow
+- [x] Add tooltip for Re-learn/Static Noise behavior
+  - [x] Update UI tooltip text
+- [x] Repurpose Learn button to Re-learn + fix noise reduction behavior/low-end bump
+  - [x] Inspect UI wiring for learn/clear + slider mapping
+  - [x] Update DSP to support Re-learn behavior while playing
+  - [x] Investigate low-end bump with noise reduction
+  - [x] Update docs/labels if needed
+- [x] Implement always-learn noise profile with stability gating + dual profile
+  - [x] Review existing NoiseLearnRemove design + call sites
+  - [x] Implement dual-profile learner + stability gating
+  - [x] Wire config/behavior in processing loop
+  - [x] Update docs/comments if behavior changes
 - [x] Clean up and sync documentation files
   - [x] Update `CLAUDE.md` (remove protocol duplicates, update version/architecture)
   - [x] Sync `GEMINI.md` with `CLAUDE.md`

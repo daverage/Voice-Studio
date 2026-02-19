@@ -1,73 +1,26 @@
-{"level":"info","ts":1769690387.940374,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769690387.9433742,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
-{"level":"info","ts":1769690388.274111,"caller":"tinymem/main.go:602","msg":"A new version of tinyMem is available: v0.1.16 (current: vv0.1.15). Download it from: https://github.com/daverage/tinymem/releases"}
-{"level":"info","ts":1769690391.104038,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769690391.108144,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
-{"level":"info","ts":1769690391.223917,"caller":"tinymem/main.go:602","msg":"A new version of tinyMem is available: v0.1.16 (current: vv0.1.15). Download it from: https://github.com/daverage/tinymem/releases"}
-{"level":"info","ts":1769690580.30884,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769690775.7333262,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769690793.691691,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769690793.697991,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
-{"level":"info","ts":1769690794.083742,"caller":"tinymem/main.go:602","msg":"A new version of tinyMem is available: v0.1.17 (current: vv0.1.16). Download it from: https://github.com/daverage/tinymem/releases"}
-{"level":"info","ts":1769690797.692523,"caller":"mcp/server.go:84","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769690797.694609,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
-{"level":"info","ts":1769690797.830552,"caller":"tinymem/main.go:602","msg":"A new version of tinyMem is available: v0.1.17 (current: vv0.1.16). Download it from: https://github.com/daverage/tinymem/releases"}
-{"level":"info","ts":1769690891.797428,"caller":"ralph/engine.go:49","msg":"Ralph loop iteration started","iteration":1,"task":"Run Ralph loop as requested before planning/doc updates"}
-{"level":"info","ts":1769690891.96371,"caller":"ralph/engine.go:75","msg":"Ralph loop success: all evidence passed","iteration":1}
-{"level":"info","ts":1769765112.482453,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769765112.482829,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769765135.1459599,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769765135.1461802,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769765252.060746,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769765252.0609229,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769765277.101551,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769765277.1015959,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769766280.9845572,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769766283.8239942,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769766283.824073,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769766336.158609,"caller":"ralph/engine.go:49","msg":"Ralph loop iteration started","iteration":1,"task":"Compile Voice Studio plugin with new UI CSS"}
-{"level":"info","ts":1769766341.7645068,"caller":"ralph/engine.go:75","msg":"Ralph loop success: all evidence passed","iteration":1}
-{"level":"info","ts":1769766624.119931,"caller":"ralph/engine.go:49","msg":"Ralph loop iteration started","iteration":1,"task":"Rebuild Voice Studio plugin with corrected CSS matching ui.rs class names"}
-{"level":"info","ts":1769766636.049302,"caller":"ralph/engine.go:75","msg":"Ralph loop success: all evidence passed","iteration":1}
-{"level":"info","ts":1769767327.661004,"caller":"ralph/engine.go:49","msg":"Ralph loop iteration started","iteration":1,"task":"Build Voice Studio with standardized UI button helpers"}
-{"level":"warn","ts":1769767329.542229,"caller":"ralph/engine.go:83","msg":"Ralph loop evidence check failed","iteration":1,"evidence":{"cmd_exit0::cargo build --release":false}}
-{"level":"info","ts":1769767329.542295,"caller":"ralph/engine.go:95","msg":"Ralph loop performing recall","iteration":1}
-{"level":"info","ts":1769767329.5427399,"caller":"ralph/engine.go:106","msg":"Ralph loop attempting repair","iteration":1}
-{"level":"error","ts":1769767329.5435,"caller":"ralph/engine.go:109","msg":"Ralph loop repair failed","iteration":1,"error":"LLM call failed: Post \"http://localhost:11434/v1/chat/completions\": dial tcp [::1]:11434: connect: connection refused","stacktrace":"github.com/daverage/tinymem/internal/ralph.(*Engine).ExecuteLoop\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/internal/ralph/engine.go:109\ngithub.com/daverage/tinymem/internal/server/mcp.(*Server).handleMemoryRalph\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/internal/server/mcp/server.go:460\ngithub.com/daverage/tinymem/internal/server/mcp.(*Server).handleToolCall\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/internal/server/mcp/server.go:440\ngithub.com/daverage/tinymem/internal/server/mcp.(*Server).handleRequest\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/internal/server/mcp/server.go:136\ngithub.com/daverage/tinymem/internal/server/mcp.(*Server).Start\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/internal/server/mcp/server.go:126\nmain.runMcpCmd\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/cmd/tinymem/main.go:146\nmain.main.newAppRunner.func4\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/cmd/tinymem/main.go:616\ngithub.com/spf13/cobra.(*Command).execute\n\t/Users/andrzejmarczewski/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1019\ngithub.com/spf13/cobra.(*Command).ExecuteC\n\t/Users/andrzejmarczewski/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1148\ngithub.com/spf13/cobra.(*Command).Execute\n\t/Users/andrzejmarczewski/go/pkg/mod/github.com/spf13/cobra@v1.10.2/command.go:1071\nmain.main\n\t/Users/andrzejmarczewski/Documents/GitHub/tinyMem/cmd/tinymem/main.go:646\nruntime.main\n\t/opt/homebrew/Cellar/go/1.25.6/libexec/src/runtime/proc.go:285"}
-{"level":"info","ts":1769767741.805936,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769768661.9865012,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769768678.57279,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769768678.572869,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769769309.591428,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769769314.559464,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769769314.5595598,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769769427.187895,"caller":"recall/engine.go:222","msg":"Recall tier breakdown","project_id":"/Users/andrzejmarczewski/Documents/GitHub/Voice-Studio-Rollback","query":"Voice Studio project architecture and constraints","always_count":0,"contextual_count":10,"opportunistic_count":5}
-{"level":"info","ts":1769769427.187968,"caller":"recall/engine.go:503","msg":"Recall metrics","project_id":"/Users/andrzejmarczewski/Documents/GitHub/Voice-Studio-Rollback","query":"Voice Studio project architecture and constraints","query_type":"search","total_memories":10,"total_tokens":1361,"duration_ms":1,"memory_ids_and_types":["2(decision)","3(decision)","4(decision)","5(decision)","6(decision)","7(decision)","8(decision)","11(decision)","12(decision)","13(decision)"],"tier_always":0,"tier_contextual":10,"tier_opportunistic":0}
-{"level":"info","ts":1769770386.4188218,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769770389.132948,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769770389.133131,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769775381.16864,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769775381.1706612,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769775532.55124,"caller":"recall/engine.go:503","msg":"Recall metrics","project_id":"/Users/andrzejmarczewski/Documents/GitHub/Voice-Studio-Rollback","query":"ui.css styling import vizia","query_type":"search","total_memories":0,"total_tokens":0,"duration_ms":2,"memory_ids_and_types":[],"tier_always":0,"tier_contextual":0,"tier_opportunistic":0}
-{"level":"info","ts":1769778889.950043,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769781804.284097,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769781804.284202,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769783025.0748138,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769783028.894454,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769783028.894519,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769783035.02119,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769783041.909802,"caller":"mcp/server.go:87","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769783041.909874,"caller":"tinymem/main.go:144","msg":"Starting MCP server"}
-{"level":"info","ts":1769861284.0007942,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769861295.4191759,"caller":"app/modules.go:110","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769861295.41974,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
-{"level":"info","ts":1769861314.066769,"caller":"recall/engine.go:222","msg":"Recall tier breakdown","project_id":"/Users/andrzejmarczewski/Documents/GitHub/Voice-Studio-Rollback","query":"mud preset","always_count":0,"contextual_count":0,"opportunistic_count":1}
-{"level":"info","ts":1769861314.0670028,"caller":"recall/engine.go:503","msg":"Recall metrics","project_id":"/Users/andrzejmarczewski/Documents/GitHub/Voice-Studio-Rollback","query":"mud preset","query_type":"search","total_memories":1,"total_tokens":239,"duration_ms":1,"memory_ids_and_types":["10(observation)"],"tier_always":0,"tier_contextual":0,"tier_opportunistic":1}
-{"level":"info","ts":1769878322.664187,"caller":"app/modules.go:110","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769878322.665208,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
-{"level":"info","ts":1769878423.541163,"caller":"recall/engine.go:503","msg":"Recall metrics","project_id":"/Users/andrzejmarczewski/Documents/GitHub/Voice-Studio-Rollback","query":"cargo lockfile async-channel error","query_type":"search","total_memories":0,"total_tokens":0,"duration_ms":1,"memory_ids_and_types":[],"tier_always":0,"tier_contextual":0,"tier_opportunistic":0}
-{"level":"info","ts":1769879460.986824,"caller":"recall/engine.go:222","msg":"Recall tier breakdown","project_id":"/Users/andrzejmarczewski/Documents/GitHub/Voice-Studio-Rollback","query":"release script fixes","always_count":0,"contextual_count":11,"opportunistic_count":1}
-{"level":"info","ts":1769879460.9871051,"caller":"recall/engine.go:503","msg":"Recall metrics","project_id":"/Users/andrzejmarczewski/Documents/GitHub/Voice-Studio-Rollback","query":"release script fixes","query_type":"search","total_memories":10,"total_tokens":2902,"duration_ms":2,"memory_ids_and_types":["2(decision)","4(decision)","5(decision)","7(decision)","11(decision)","13(decision)","17(decision)","18(decision)","20(decision)","22(decision)"],"tier_always":0,"tier_contextual":10,"tier_opportunistic":0}
-{"level":"info","ts":1769889692.515798,"caller":"app/app.go:96","msg":"Database connection closed."}
-{"level":"info","ts":1769889697.41035,"caller":"app/modules.go:110","msg":"CoVe enabled (extraction + recall filtering)","confidence_threshold":0.6,"max_candidates":20}
-{"level":"info","ts":1769889697.410443,"caller":"tinymem/main.go:143","msg":"Starting MCP server"}
+{"level":"info","ts":1770288276.36691,"caller":"app/app.go:62","msg":"Running database maintenance on startup"}
+{"level":"info","ts":1770288276.368,"caller":"app/app.go:66","msg":"Database maintenance completed"}
+{"level":"info","ts":1770288276.369014,"caller":"app/app.go:130","msg":"Periodic database maintenance started","interval":86400}
+{"level":"info","ts":1770288276.376352,"caller":"app/modules.go:90","msg":"LLM provider initialized","provider":"external HTTP","mode":"mcp","usage":"CoVe verification"}
+{"level":"info","ts":1770288276.376443,"caller":"app/modules.go:108","msg":"CoVe enabled","mode":"mcp","confidence_threshold":0.6,"max_candidates":20}
+{"level":"info","ts":1770288276.376458,"caller":"tinymem/main.go:147","msg":"Starting MCP server"}
+{"level":"info","ts":1770288354.5406091,"caller":"app/app.go:160","msg":"Stopping periodic database maintenance"}
+{"level":"info","ts":1770288354.54389,"caller":"app/app.go:177","msg":"Database connection closed."}
+{"level":"info","ts":1770288365.217506,"caller":"app/app.go:62","msg":"Running database maintenance on startup"}
+{"level":"info","ts":1770288365.2183151,"caller":"app/app.go:66","msg":"Database maintenance completed"}
+{"level":"info","ts":1770288365.219229,"caller":"app/app.go:130","msg":"Periodic database maintenance started","interval":86400}
+{"level":"info","ts":1770288365.224364,"caller":"app/modules.go:90","msg":"LLM provider initialized","provider":"external HTTP","mode":"mcp","usage":"CoVe verification"}
+{"level":"info","ts":1770288365.224471,"caller":"app/modules.go:108","msg":"CoVe enabled","mode":"mcp","confidence_threshold":0.6,"max_candidates":20}
+{"level":"info","ts":1770288365.2244852,"caller":"tinymem/main.go:147","msg":"Starting MCP server"}
+{"level":"info","ts":1770369834.406378,"caller":"app/app.go:62","msg":"Running database maintenance on startup"}
+{"level":"info","ts":1770369834.4072242,"caller":"app/app.go:66","msg":"Database maintenance completed"}
+{"level":"info","ts":1770369834.408153,"caller":"app/app.go:130","msg":"Periodic database maintenance started","interval":86400}
+{"level":"info","ts":1770369834.412641,"caller":"app/modules.go:90","msg":"LLM provider initialized","provider":"external HTTP","mode":"mcp","usage":"CoVe verification"}
+{"level":"info","ts":1770369834.41271,"caller":"app/modules.go:108","msg":"CoVe enabled","mode":"mcp","confidence_threshold":0.6,"max_candidates":20}
+{"level":"info","ts":1770369834.412719,"caller":"tinymem/main.go:147","msg":"Starting MCP server"}
+{"level":"info","ts":1770456234.1251578,"caller":"app/app.go:136","msg":"Running periodic database maintenance"}
+{"level":"info","ts":1770456234.14199,"caller":"app/app.go:140","msg":"Periodic database maintenance completed"}
+{"level":"info","ts":1770542633.8096461,"caller":"app/app.go:136","msg":"Running periodic database maintenance"}
+{"level":"info","ts":1770542633.820096,"caller":"app/app.go:140","msg":"Periodic database maintenance completed"}
+{"level":"info","ts":1770629033.3348138,"caller":"app/app.go:136","msg":"Running periodic database maintenance"}
+{"level":"info","ts":1770629033.3437572,"caller":"app/app.go:140","msg":"Periodic database maintenance completed"}

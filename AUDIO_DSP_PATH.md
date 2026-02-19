@@ -3,14 +3,29 @@
 ## Overview
 This document outlines the complete audio processing path through the VxCleaner plugin, detailing each DSP module, its function, and frequency range characteristics.
 
+## Always-On DSP Summary
+These modules can modify the signal even when all user sliders are set to 0:
+- **`SpeechHpf`**: 90Hz HPF (Q=0.707) hidden hygiene filter.
+- **`HissRumble`**: Rumble HPF is always at 20Hz; hiss shelf is flat at 0.
+- **`PinkRefBias`**: Speech-gated pink tilt correction, ±2 dB max via low shelf at 250Hz and high shelf at 4kHz.
+- **`StereoStreamingDenoiser` / `DspDenoiser`**: MMSE-LSA gain stage still runs; 0 amount only resets history, not the gain calculation.
+- **`PlosiveSoftener`**: Dynamic low-shelf at 150Hz, up to 8 dB attenuation on plosives.
+- **`RestorationChain::safety_hpf`**: 80Hz HPF safety filter (Q=0.707).
+- **`RecoveryStage`**: Speech-gated presence/air shelves (+1.5 to +2.5 dB @ 2.5kHz, +2 to +4 dB @ 10kHz).
+- **`SpectralGuardrails`**: Conditional low-mid and high cuts up to 5 dB based on band ratios.
+- **`LinkedLimiter`**: True-peak limiter at 0.98 (~-0.18 dBTP) engages on peaks.
+- **Loudness compensation**: 10s time constant, gain clamped to 0.9–1.1.
+- **Output safety clamp**: Scales output if absolute peak exceeds 4.0.
+
 ## Complete Audio Processing Chain
 
 ### 0. Input Preprocessing
 **0a. Speech HPF (Hidden Hygiene)**
 - **Module**: `SpeechHpf`
 - **Function**: Removes subsonic energy before any analysis or processing
-- **Frequency Range**: High-pass filter below 20Hz
+- **Frequency Range**: High-pass filter below 90Hz (Q=0.707)
 - **Purpose**: Eliminates DC offset and subsonic rumble that could interfere with other processing
+- **Always-On Note**: This filter is always in the signal path, even with all sliders at 0.
 
 **0b. Envelope Tracking**
 - **Module**: `VoiceEnvelopeTracker`
@@ -35,14 +50,16 @@ This document outlines the complete audio processing path through the VxCleaner 
 - **Function**: Learns and removes static noise (hum, buzz, computer fans)
 - **Frequency Range**: Full bandwidth
 - **Purpose**: Removes consistent background noise that doesn't vary over time
+ - **Behavior**: Always-on learning (when enabled) gated by low speech confidence with stability checks; a candidate profile must stabilize before updating the learned profile.
 
 ### 0x. Hiss & Rumble Processing
 **Module**: `HissRumble`
 - **Function**: Shapes tonal characteristics of hiss and rumble
 - **Frequency Range**: 
-  - Rumble: 20Hz - 200Hz (low frequencies)
-  - Hiss: 6kHz - 12kHz (high frequencies)
+  - Rumble: 20Hz - 120Hz HPF sweep
+  - Hiss: 8kHz high-shelf cut up to -24 dB
 - **Purpose**: Adjusts the tonal balance of noise components before denoising
+- **Always-On Note**: Even at 0 settings, the rumble HPF remains at 20Hz and is still in the path.
 
 ### 1. Early Reflection Suppression
 **Module**: `EarlyReflectionSuppressor`
@@ -70,6 +87,7 @@ This document outlines the complete audio processing path through the VxCleaner 
   - Capped at ±2.0 dB total correction to prevent over-processing
   - Slow ballistics (2-second tilt averaging, gradual gain smoothing)
   - Safety adjustments when interacting with proximity or de-esser
+- **Always-On Note**: Can apply low-shelf changes at 250Hz (and high-shelf at 4kHz) during speech even when all user sliders are 0.
 
 ### 4. Restoration Stage
 
@@ -79,12 +97,15 @@ This document outlines the complete audio processing path through the VxCleaner 
 - **Frequency Range**: Full bandwidth (adaptive per frequency bin)
 - **Processing Type**: Spectral Wiener filtering with speech probability estimation
 - **Special Features**: Harmonic protection, psychoacoustic masking, adaptive noise floor tracking
+- **Always-On Note**: The MMSE-LSA gain stage still runs even at 0 amount; 0 only resets history, it does not fully bypass gain calculation.
 
 **4b. Plosive Softener**
 - **Module**: `PlosiveSoftener`
 - **Function**: Reduces popping sounds from plosive consonants (p, t, k)
 - **Frequency Range**: Primarily affects low frequencies (below 500Hz)
 - **Purpose**: Removes explosive breath sounds without affecting speech quality
+- **Key Values**: 150Hz low-shelf, threshold 0.08, max 8 dB attenuation, attack 1ms, release 50ms
+- **Always-On Note**: Always in the path; only engages when plosive bursts are detected.
 
 **4c. Breath Reducer**
 - **Module**: `BreathReducer`
@@ -95,7 +116,7 @@ This document outlines the complete audio processing path through the VxCleaner 
 **4d. Safety High-Pass Filter**
 - **Module**: `Biquad` (configured as HPF)
 - **Function**: Ensures minimum low-frequency roll-off for safety
-- **Frequency Range**: Below 80Hz (typically 80Hz HPF)
+- **Frequency Range**: Below 80Hz (80Hz HPF, Q=0.707)
 - **Purpose**: Prevents excessive low-frequency buildup
 
 **4e. Deverber**
@@ -148,8 +169,10 @@ This document outlines the complete audio processing path through the VxCleaner 
 **6c. Spectral Guardrails**
 - **Module**: `SpectralGuardrails`
 - **Function**: Safety limits for extreme settings to prevent artifacts
-- **Frequency Range**: Full bandwidth with specific attention to low-mid and high-frequency ranges
+- **Frequency Range**: Full bandwidth with specific attention to low-mid (200-500Hz) and high (8-16kHz) bands
 - **Purpose**: Prevents processing from creating unnatural or broken sounds
+- **Key Values**: Up to 5 dB low-mid cut and 5 dB high cut when ratios exceed thresholds
+- **Always-On Note**: Runs continuously and applies corrections only when ratios trip.
 
 ### 7. Recovery Stage
 **Module**: `RecoveryStage`
@@ -158,6 +181,17 @@ This document outlines the complete audio processing path through the VxCleaner 
   - Presence: ~2kHz-5kHz shelving
   - Air: ~8kHz-12kHz shelving
 - **Purpose**: Compensates for losses during subtractive processing during speech
+- **Key Values**: Presence +1.5 to +2.5 dB @ 2.5kHz, Air +2 to +4 dB @ 10kHz (speech gated)
+
+### 7b. Post-Noise Cleanup (Second Pass)
+**Module**: `PostNoiseCleanup`
+- **Function**: Very light, confidence-gated attenuation to tuck residual noise revealed by recovery
+- **Frequency Range**: Full bandwidth with a high-shelf bias toward upper bands
+- **Behavior**: Engages only when speech confidence is low; falls back to envelope gating if confidence is flatlined
+- **Purpose**: Cosmetic cleanup without altering tone or dynamics
+- **Key Values**: Max 2–3 dB attenuation, fast attack, slower release, short hold
+- **Options**: Optional HF bias toggle; can be bypassed by the Hidden FX toggle.
+- **Controls**: Low-end protection toggle affects denoiser voicing protection in the first pass.
 
 ### 8. Output Stage
 
@@ -180,6 +214,17 @@ This document outlines the complete audio processing path through the VxCleaner 
 - **Function**: Automatic loudness normalization and true-peak limiting
 - **Processing**: LUFS-based gain adjustment with true-peak limiting
 - **Purpose**: Delivers consistent loudness levels for distribution
+
+**8d. Loudness Compensation (Always On)**
+- **Module**: Internal gain normalization in the main process loop
+- **Function**: Preserves pre-processing RMS within ±10% with slow smoothing
+- **Processing**: 10-second time constant, gain clamped to 0.9–1.1
+- **Purpose**: Prevents long-term loudness drift even when upstream processing changes level
+
+**8e. Output Safety Clamp (Always On)**
+- **Module**: Final peak safeguard in the main process loop
+- **Function**: Scales output if absolute peak exceeds 4.0
+- **Purpose**: Hard safety against runaway values or NaNs
 
 ## Key Design Principles
 

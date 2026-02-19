@@ -301,11 +301,20 @@ impl SpeechConfidenceEstimator {
 
         // Combine features into raw confidence.
         // Keep weights stable and conservative: ratio is primary, others are supporting evidence.
-        let raw = if rms_total > MIN_RMS_THRESHOLD {
-            0.45 * sr_score + 0.20 * struct_score + 0.15 * flux + 0.20 * above_floor
+        let mut raw = if rms_total > MIN_RMS_THRESHOLD {
+            0.40 * sr_score + 0.15 * struct_score + 0.25 * flux + 0.20 * above_floor
         } else {
             0.0
         };
+
+        // STATIONARY NOISE PENALTY (Pink Noise Detector)
+        // Pink noise has high `sr_score` (speech band energy) and high `above_floor` (loudness),
+        // but very low `flux` (steady state).
+        // If we see high energy but low flux, we crush the confidence.
+        if rms_total > 0.01 && flux < 0.15 {
+             // "This is loud but dead steady - it's a test signal or fan"
+             raw *= 0.2;
+        }
 
         self.raw_confidence = raw.clamp(0.0, 1.0);
 

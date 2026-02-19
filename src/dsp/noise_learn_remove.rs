@@ -5,7 +5,7 @@
 //! stationary noise fingerprint (hiss, room tone, rumble) even during silence.
 //!
 //! Design goals
-//! - Learn is explicit (button), time-limited (10s), and only allowed during low speech confidence.
+//! - Learning is continuous (always-on), gated by low speech confidence and stability checks.
 //! - Removal works during silence, independent of speech-aware denoisers.
 //! - Deterministic, real-time safe (no alloc in process), never amplifies, never “chases” speech.
 //! - Bounded subtraction: only attenuates, with smoothing to avoid zipper/warble.
@@ -31,14 +31,19 @@ use std::sync::Arc;
 const RINGBUF_CAP_MULT: usize = 4;
 
 // Only allow learning when speech confidence is low (room tone / silence)
-const LEARN_CONFIDENCE_THRESHOLD: f32 = 0.15;
-
-// Hard stop learning after this many seconds
-const LEARN_TIME_LIMIT_SEC: f32 = 10.0;
+const LEARN_CONFIDENCE_THRESHOLD: f32 = 0.25;
 
 // EMA time constants (seconds)
-const LEARN_EMA_TAU: f32 = 0.5;
+const CANDIDATE_EMA_TAU: f32 = 0.25;
+const LEARNED_EMA_TAU: f32 = 4.0;
 const QUALITY_EMA_TAU: f32 = 2.0;
+
+// Stability gating: require a stable window before promoting candidate -> learned
+const STABILITY_TIME_SEC: f32 = 0.6;
+const STABILITY_DELTA_THRESHOLD: f32 = 0.18;
+
+// Re-learn latch duration (seconds)
+const RELEARN_TIME_SEC: f32 = 5.0;
 
 // Gain smoothing per frame
 const GAIN_SMOOTH_ALPHA: f32 = 0.2;
@@ -186,22 +191,29 @@ struct NoiseLearnRemoveDetector {
     window: Vec<f32>,
     current_mag: Vec<f32>,
 
-    // Learned profile (magnitude, nyq+1)
+    // Candidate profile (fast) and learned profile (slow)
+    candidate_mag: Vec<f32>,
+    candidate_energy: f32,
     learned_mag: Vec<f32>,
     learned_energy: f32, // quick “is learned?” check
 
     // UI metric
     quality: f32,
 
-    // Learn budget
-    learn_frames_accum: usize,
-    max_learn_frames: usize,
+    // Stability gate
+    stable_frames: usize,
+    stable_frames_required: usize,
+    relearn_frames_left: usize,
+    relearn_frames_total: usize,
+    learn_latched: bool,
+    relearn_armed: bool,
 
     // Per-bin smoothed gains (nyq+1)
     gain_smooth: Vec<f32>,
 
     // EMA coefficients
-    learn_alpha: f32,
+    candidate_alpha: f32,
+    learned_alpha: f32,
     quality_alpha: f32,
 
     win_size: usize,
@@ -220,10 +232,12 @@ impl NoiseLearnRemoveDetector {
         let nyq = win / 2;
         let frame_dt = hop as f32 / sr.max(1.0);
 
-        let learn_alpha = 1.0 - (-frame_dt / LEARN_EMA_TAU).exp();
+        let candidate_alpha = 1.0 - (-frame_dt / CANDIDATE_EMA_TAU).exp();
+        let learned_alpha = 1.0 - (-frame_dt / LEARNED_EMA_TAU).exp();
         let quality_alpha = 1.0 - (-frame_dt / QUALITY_EMA_TAU).exp();
 
-        let max_learn_frames = (LEARN_TIME_LIMIT_SEC / frame_dt).ceil().max(1.0) as usize;
+        let stable_frames_required = (STABILITY_TIME_SEC / frame_dt).ceil().max(1.0) as usize;
+        let relearn_frames_total = (RELEARN_TIME_SEC / frame_dt).ceil().max(1.0) as usize;
 
         Self {
             fft,
@@ -232,17 +246,24 @@ impl NoiseLearnRemoveDetector {
             window: make_sqrt_hann_window(win),
             current_mag: vec![0.0; nyq + 1],
 
+            candidate_mag: vec![0.0; nyq + 1],
+            candidate_energy: 0.0,
             learned_mag: vec![0.0; nyq + 1],
             learned_energy: 0.0,
 
             quality: 0.0,
 
-            learn_frames_accum: 0,
-            max_learn_frames,
+            stable_frames: 0,
+            stable_frames_required,
+            relearn_frames_left: 0,
+            relearn_frames_total,
+            learn_latched: false,
+            relearn_armed: false,
 
             gain_smooth: vec![1.0; nyq + 1],
 
-            learn_alpha,
+            candidate_alpha,
+            learned_alpha,
             quality_alpha,
 
             win_size: win,
@@ -261,15 +282,20 @@ impl NoiseLearnRemoveDetector {
     /// Clears only DSP state (smoothing, history), preserves learned profile.
     fn reset_state(&mut self) {
         self.gain_smooth.fill(1.0);
-        // We do NOT clear learned_mag, learned_energy, quality, learn_frames_accum
+        // We do NOT clear learned_mag, learned_energy, quality, or stability state
     }
 
     /// Clears the learned profile (destructive).
     fn clear_profile(&mut self) {
+        self.candidate_mag.fill(0.0);
+        self.candidate_energy = 0.0;
         self.learned_mag.fill(0.0);
         self.learned_energy = 0.0;
         self.quality = 0.0;
-        self.learn_frames_accum = 0;
+        self.stable_frames = 0;
+        self.relearn_frames_left = 0;
+        self.learn_latched = false;
+        self.relearn_armed = false;
         self.gain_smooth.fill(1.0);
     }
 
@@ -278,7 +304,12 @@ impl NoiseLearnRemoveDetector {
     }
 
     fn learn_progress(&self) -> f32 {
-        (self.learn_frames_accum as f32 / self.max_learn_frames as f32).clamp(0.0, 1.0)
+        (self.stable_frames as f32 / self.stable_frames_required as f32).clamp(0.0, 1.0)
+    }
+
+    fn trigger_relearn(&mut self) {
+        self.clear_profile();
+        self.relearn_armed = true;
     }
 
     fn analyze_frame(
@@ -302,59 +333,94 @@ impl NoiseLearnRemoveDetector {
             self.current_mag[i] = m.max(MAG_FLOOR);
         }
 
-        // 3) Learning
+        // 3) Learning (continuous, stability-gated)
         let is_silence = sidechain.speech_conf < LEARN_CONFIDENCE_THRESHOLD;
-        let not_finished = self.learn_frames_accum < self.max_learn_frames;
+        if cfg.learn && !self.learn_latched {
+            self.trigger_relearn();
+        }
+        self.learn_latched = cfg.learn;
 
-        if cfg.learn && is_silence && not_finished {
-            self.learn_frames_accum += 1;
+        if self.relearn_armed && is_silence {
+            self.relearn_frames_left = self.relearn_frames_total;
+            self.relearn_armed = false;
+        }
 
-            if self.learn_frames_accum == 1 {
-                // initialise
+        let relearn_active = if self.relearn_frames_left > 0 {
+            self.relearn_frames_left -= 1;
+            true
+        } else {
+            false
+        };
+
+        let can_learn = relearn_active && (is_silence || relearn_active);
+
+        if can_learn {
+            // Candidate EMA update (fast)
+            if self.candidate_energy <= 1e-9 {
                 for i in 0..=nyq {
-                    self.learned_mag[i] = self.current_mag[i];
+                    self.candidate_mag[i] = self.current_mag[i];
                 }
             } else {
-                // EMA update
                 for i in 0..=nyq {
-                    let v = self.learned_mag[i];
-                    self.learned_mag[i] = v + self.learn_alpha * (self.current_mag[i] - v);
+                    let v = self.candidate_mag[i];
+                    self.candidate_mag[i] = v + self.candidate_alpha * (self.current_mag[i] - v);
                 }
             }
 
-            // Update learned energy for “profile exists” checks
-            let mut e = 0.0;
+            // Update candidate energy
+            let mut c = 0.0;
             for i in 0..=nyq {
-                e += self.learned_mag[i];
+                c += self.candidate_mag[i];
             }
-            self.learned_energy = e;
+            self.candidate_energy = c;
 
-            // Quality: measure stability of current vs learned (lower delta => higher quality)
+            // Stability: compare current frame to candidate
             let mut delta_sum = 0.0;
-            let mut learned_sum = 0.0;
+            let mut cand_sum = 0.0;
             for i in 0..=nyq {
-                delta_sum += (self.current_mag[i] - self.learned_mag[i]).abs();
-                learned_sum += self.learned_mag[i];
+                delta_sum += (self.current_mag[i] - self.candidate_mag[i]).abs();
+                cand_sum += self.candidate_mag[i];
             }
 
-            let normalized_delta = if learned_sum > EPS {
-                delta_sum / learned_sum
+            let normalized_delta = if cand_sum > EPS {
+                delta_sum / cand_sum
             } else {
                 1.0
             };
 
-            // Map to 0..1
             let stability = 1.0 / (1.0 + normalized_delta * 2.0);
             self.quality += self.quality_alpha * (stability - self.quality);
-        } else {
-            // If not learning, slowly decay quality towards “whatever we already have”.
-            // This stops quality getting stuck at 1.0 forever after a lucky learn frame.
-            let target = if self.has_profile() {
-                self.quality
+
+            if normalized_delta < STABILITY_DELTA_THRESHOLD {
+                self.stable_frames = (self.stable_frames + 1).min(self.stable_frames_required);
             } else {
-                0.0
-            };
-            self.quality += self.quality_alpha * (target - self.quality);
+                self.stable_frames = 0;
+            }
+
+            // Promote candidate -> learned after a stable window
+            if self.stable_frames >= self.stable_frames_required && self.candidate_energy > 1e-6 {
+                if !self.has_profile() {
+                    for i in 0..=nyq {
+                        self.learned_mag[i] = self.candidate_mag[i];
+                    }
+                } else {
+                    for i in 0..=nyq {
+                        let v = self.learned_mag[i];
+                        self.learned_mag[i] = v + self.learned_alpha * (self.candidate_mag[i] - v);
+                    }
+                }
+
+                let mut e = 0.0;
+                for i in 0..=nyq {
+                    e += self.learned_mag[i];
+                }
+                self.learned_energy = e;
+            }
+        } else {
+            self.stable_frames = 0;
+            if !(cfg.enabled && self.has_profile()) {
+                self.quality += self.quality_alpha * (0.0 - self.quality);
+            }
         }
 
         // 4) Subtraction (bounded attenuation only)

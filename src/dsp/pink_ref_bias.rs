@@ -329,7 +329,8 @@ impl PinkRefBias {
         }
 
         // 5. Update Tilt Estimate
-        if self.gate_smooth > 0.01 && !self.is_frozen {
+        // Only update tilt if we are confident it's speech (gate > 0.1) and not frozen
+        if self.gate_smooth > 0.1 && !self.is_frozen {
             // Outlier rejection
             let t_meas_safe = t_meas.clamp(-12.0, 12.0);
             self.tilt_est = self.tilt_coeff * self.tilt_est + (1.0 - self.tilt_coeff) * t_meas_safe;
@@ -354,8 +355,11 @@ impl PinkRefBias {
 
         // Apply Gate scaling
         // "G_db_final(f) = g_s * clamp(...)"
-        let g_lo_final = self.gate_smooth * g_lo_clamped;
-        let g_hi_final = self.gate_smooth * g_hi_clamped;
+        // SAFETY: If speech confidence is marginal (< 0.5), force gain to 0.0 to prevent "breathing" on noise
+        let safe_gate = if speech_conf < 0.5 { 0.0 } else { self.gate_smooth };
+
+        let g_lo_final = safe_gate * g_lo_clamped;
+        let g_hi_final = safe_gate * g_hi_clamped;
 
         // Map to shelves (Low * 0.9, High * 1.0)
         self.target_lo_db = g_lo_final * 0.9;

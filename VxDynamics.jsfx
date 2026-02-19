@@ -1,0 +1,191 @@
+desc:VxDynamics (Plosive, DeMud, DeEss, Comp, Lim)
+// A clean, modular implementation of the VxCleaner dynamics chain.
+// Signal Flow: Plosive -> DeMud -> DeEss -> Compressor -> Limiter
+
+slider1:0<0,100,1>Plosive Reduction (%)
+slider2:0<0,100,1>De-Mud Amount (%)
+slider3:0<0,100,1>De-Ess Amount (%)
+slider4:0<0,100,1>Compressor Amount (%)
+slider5:0<-12,12,0.1>Makeup Gain (dB)
+slider6:0<0,1,1{Off,On}>Limiter Enable
+
+@init
+sr = srate;
+pi = $pi;
+eps = 0.000000001;
+
+// --- UTILITY FUNCTIONS ---
+function clamp(v, lo, hi) ( v < lo ? lo : (v > hi ? hi : v); );
+function db2lin(db) ( pow(10, db/20); );
+function lin2db(lin) ( 20 * log10(lin); );
+
+// --- BIQUAD FILTERS ---
+function biquad_lowshelf(f0, q, g_db) (
+  A=pow(10, g_db/40); w0=2*$pi*f0/sr; alpha=sin(w0)/(2*q); c=cos(w0);
+  ap1=A+1; am1=A-1; sA=2*sqrt(A)*alpha;
+  b0=A*(ap1-am1*c+sA); b1=2*A*(am1-ap1*c); b2=A*(ap1-am1*c-sA);
+  a0=ap1+am1*c+sA; a1=-2*(am1+ap1*c); a2=ap1+am1*c-sA;
+  this.b0=b0/a0; this.b1=b1/a0; this.b2=b2/a0; this.a1=a1/a0; this.a2=a2/a0;
+);
+function biquad_peaking(f0, q, g_db) (
+  A=pow(10, g_db/40); w0=2*$pi*f0/sr; alpha=sin(w0)/(2*q); c=cos(w0);
+  b0=1+alpha*A; b1=-2*c; b2=1-alpha*A; a0=1+alpha/A; a1=-2*c; a2=1-alpha/A;
+  this.b0=b0/a0; this.b1=b1/a0; this.b2=b2/a0; this.a1=a1/a0; this.a2=a2/a0;
+);
+function biquad_hpf(f0, q) (
+  w0=2*$pi*f0/sr; alpha=sin(w0)/(2*q); c=cos(w0);
+  b0=(1+c)/2; b1=-(1+c); b2=(1+c)/2; a0=1+alpha; a1=-2*c; a2=1-alpha;
+  this.b0=b0/a0; this.b1=b1/a0; this.b2=b2/a0; this.a1=a1/a0; this.a2=a2/a0;
+);
+function biquad_lpf(f0, q) (
+  w0=2*$pi*f0/sr; alpha=sin(w0)/(2*q); c=cos(w0);
+  b0=(1-c)/2; b1=1-c; b2=(1-c)/2; a0=1+alpha; a1=-2*c; a2=1-alpha;
+  this.b0=b0/a0; this.b1=b1/a0; this.b2=b2/a0; this.a1=a1/a0; this.a2=a2/a0;
+);
+function proc(x) (
+  y=this.b0*x + this.b1*this.x1 + this.b2*this.x2 - this.a1*this.y1 - this.a2*this.y2;
+  this.x2=this.x1; this.x1=x; this.y2=this.y1; this.y1=y; y;
+);
+
+// --- MODULE INIT ---
+
+// 1. PLOSIVE SOFTENER
+// 150Hz low-shelf cut triggered by low-frequency energy
+pl_l.biquad_lowshelf(150, 0.707, 0); pl_r.biquad_lowshelf(150, 0.707, 0);
+pl_atk = 1 - exp(-1 / (sr * 0.001)); // 1ms
+pl_rel = 1 - exp(-1 / (sr * 0.050)); // 50ms
+
+// 2. DE-MUD
+// 250Hz dynamic cut triggered by low-mid energy
+dm_l.biquad_peaking(250, 1.2, 0); dm_r.biquad_peaking(250, 1.2, 0);
+dm_atk = 1 - exp(-1 / (sr * 0.010));
+dm_rel = 1 - exp(-1 / (sr * 0.100));
+
+// 3. DE-ESSER
+// 7kHz dynamic cut triggered by high-frequency energy
+de_l.biquad_peaking(7000, 1.0, 0); de_r.biquad_peaking(7000, 1.0, 0);
+// Sidechain filter for de-esser (4kHz HPF)
+ds_hp_l.biquad_hpf(4000, 0.707); ds_hp_r.biquad_hpf(4000, 0.707);
+de_atk = 1 - exp(-1 / (sr * 0.001));
+de_rel = 1 - exp(-1 / (sr * 0.030));
+
+// 4. COMPRESSOR
+// Stereo-linked RMS compressor
+comp_atk = 1 - exp(-1 / (sr * 0.005)); // 5ms
+comp_rel = 1 - exp(-1 / (sr * 0.200)); // 200ms
+
+// 5. LIMITER
+// True-peak style brickwall
+lim_atk = 1 - exp(-1 / (sr * 0.0001)); // Fast!
+lim_rel = 1 - exp(-1 / (sr * 0.400)); // 400ms
+
+@sample
+// --- PARAMS ---
+pl_amt = slider1 / 100;
+dm_amt = slider2 / 100;
+de_amt = slider3 / 100;
+comp_amt = slider4 / 100;
+makeup = db2lin(slider5);
+lim_en = slider6;
+
+inL = spl0; inR = spl1;
+
+// ==========================================
+// 1. PLOSIVE SOFTENER
+// ==========================================
+// Detect low-end bursts
+pl_env_in = 0.5 * (abs(inL) + abs(inR));
+pl_env_in > pl_env ? pl_env += (pl_env_in - pl_env) * pl_atk : pl_env += (pl_env_in - pl_env) * pl_rel;
+// Threshold ~ -22dB (0.08 linear)
+pl_reduction = min(8, max(0, pl_env - 0.08) * 20) * pl_amt;
+abs(pl_reduction - pl_cur) > 0.05 ? (
+  pl_cur = pl_reduction;
+  pl_l.biquad_lowshelf(150, 0.707, -pl_cur);
+  pl_r.biquad_lowshelf(150, 0.707, -pl_cur);
+);
+s1L = pl_l.proc(inL);
+s1R = pl_r.proc(inR);
+
+// ==========================================
+// 2. DE-MUD (DYNAMIC EQ)
+// ==========================================
+// Simple envelope tracking of the signal
+dm_env_in = 0.5 * (abs(s1L) + abs(s1R));
+dm_env_in > dm_env ? dm_env += (dm_env_in - dm_env) * dm_atk : dm_env += (dm_env_in - dm_env) * dm_rel;
+// Scale reduction based on signal loudness and user amount
+dm_reduction = -18.0 * dm_env * dm_amt; 
+dm_reduction = max(-18, dm_reduction);
+abs(dm_reduction - dm_cur) > 0.1 ? (
+  dm_cur = dm_reduction;
+  dm_l.biquad_peaking(250, 1.2, dm_cur);
+  dm_r.biquad_peaking(250, 1.2, dm_cur);
+);
+s2L = dm_l.proc(s1L);
+s2R = dm_r.proc(s1R);
+
+// ==========================================
+// 3. DE-ESSER (SPLIT BAND)
+// ==========================================
+// High-pass sidechain to detect sibilance
+sideL = ds_hp_l.proc(s2L);
+sideR = ds_hp_r.proc(s2R);
+ds_env_in = 0.5 * (abs(sideL) + abs(sideR));
+ds_env_in > ds_env ? ds_env += (ds_env_in - ds_env) * de_atk : ds_env += (ds_env_in - ds_env) * de_rel;
+// Threshold roughly around -20dB
+ds_reduction = min(12, max(0, ds_env - 0.1) * 30) * de_amt;
+abs(ds_reduction - ds_cur) > 0.1 ? (
+  ds_cur = ds_reduction;
+  de_l.biquad_peaking(7000, 1.0, -ds_cur);
+  de_r.biquad_peaking(7000, 1.0, -ds_cur);
+);
+s3L = de_l.proc(s2L);
+s3R = de_r.proc(s2R);
+
+// ==========================================
+// 4. COMPRESSOR
+// ==========================================
+// Ratio varies with amount (1:1 to 4:1)
+ratio = 1.0 + 3.0 * comp_amt;
+thresh_db = -24.0 * comp_amt; // Threshold drops as amount increases
+thresh_lin = db2lin(thresh_db);
+
+c_det = 0.5 * (abs(s3L) + abs(s3R));
+c_det > c_env ? c_env += (c_det - c_env) * comp_atk : c_env += (c_det - c_env) * comp_rel;
+
+// Gain reduction calculation
+gr_db = 0;
+c_env > thresh_lin ? (
+  env_db = lin2db(c_env);
+  over_db = env_db - thresh_db;
+  gr_db = over_db * (1.0/ratio - 1.0);
+);
+gr_lin = db2lin(gr_db);
+
+s4L = s3L * gr_lin * makeup;
+s4R = s3R * gr_lin * makeup;
+
+// ==========================================
+// 5. LIMITER
+// ==========================================
+lim_en ? (
+  pk = max(abs(s4L), abs(s4R));
+  pk > l_env ? l_env += (pk - l_env) * lim_atk : l_env += (pk - l_env) * lim_rel;
+  
+  // Ceiling at -0.3 dB
+  ceil = 0.96;
+  lim_gain = l_env > ceil ? ceil / l_env : 1.0;
+  
+  s5L = s4L * lim_gain;
+  s5R = s4R * lim_gain;
+) : (
+  s5L = s4L;
+  s5R = s4R;
+);
+
+// --- OUTPUT ---
+spl0 = s5L;
+spl1 = s5R;
+
+// Safety Clamp
+spl0 = clamp(spl0, -2.0, 2.0);
+spl1 = clamp(spl1, -2.0, 2.0);

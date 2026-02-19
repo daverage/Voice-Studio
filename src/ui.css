@@ -537,6 +537,20 @@ NOISE LEARN / SMALL CONTROLS
     color: #cbd5e1;
 }
 
+.small-button-active {
+    height: 30px;
+    width: 70px;
+    child-left: 1s;
+    child-right: 1s;
+    child-top: 1s;
+    child-bottom: 1s;
+    border-radius: 4px;
+    font-size: 13;
+    background-color: #1d4ed8;
+    border: 1px solid #3b82f6;
+    color: #ffffff;
+}
+
 .small-button:hover {
     background-color: #334155;
     color: #ffffff;
@@ -545,6 +559,18 @@ NOISE LEARN / SMALL CONTROLS
 .small-button:active {
     background-color: #1d4ed8;
     border-color: #3b82f6;
+}
+
+.hf-bias-toggle {
+    left: 0px;
+}
+
+.hidden-fx-toggle {
+    left: 0px;
+}
+
+.low-end-toggle {
+    left: 0px;
 }
 
 .mini-label {
